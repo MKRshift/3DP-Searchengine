@@ -34,6 +34,13 @@ function previewPayload(item) {
   }));
 }
 
+
+function sourceVariants(item) {
+  if (!Array.isArray(item.alsoFoundOn) || item.alsoFoundOn.length < 2) return "";
+  const extras = item.alsoFoundOn.slice(1, 5).map((source) => `<span class="card__variant">${esc(source)}</span>`).join("");
+  return `<div class="card__variants">Also on ${extras}</div>`;
+}
+
 function buildCard(item) {
   const description = item.description || item.meta?.description || item.meta?.summary || "";
   const payload = previewPayload(item);
@@ -58,6 +65,7 @@ function buildCard(item) {
         </div>
         ${description ? `<div class='card__meta' style='margin-top:6px;display:block'>${esc(description).slice(0, 96)}</div>` : ""}
         <div class="card__stats">${qualityLine(item)}</div>
+        ${sourceVariants(item)}
       </div>
     </article>
   `;

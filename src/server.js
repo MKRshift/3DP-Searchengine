@@ -4,7 +4,7 @@ import http from "node:http";
 import { fileURLToPath } from "node:url";
 
 import { getProviders } from "./providers/index.js";
-import { executeSearch, getSuggestions } from "./services/search.service.js";
+import { executeSearch, getSuggestions, getItemDetails, getProviderMetrics } from "./services/search.service.js";
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -57,8 +57,38 @@ const publicDir = path.join(rootDir, "public");
 loadEnvFile(path.join(rootDir, ".env"));
 const providers = getProviders();
 
+function reqId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function logEvent(event, details = {}) {
+  console.log(JSON.stringify({ at: new Date().toISOString(), event, ...details }));
+}
+
+const searchRateMap = new Map();
+function rateLimitSearch(req) {
+  const ip = req.socket?.remoteAddress || "unknown";
+  const now = Date.now();
+  const windowMs = 60_000;
+  const max = 80;
+  const state = searchRateMap.get(ip) || { count: 0, resetAt: now + windowMs };
+  if (now > state.resetAt) {
+    state.count = 0;
+    state.resetAt = now + windowMs;
+  }
+  state.count += 1;
+  searchRateMap.set(ip, state);
+  return state.count <= max;
+}
+
 const server = http.createServer(async (req, res) => {
+  const requestId = req.headers["x-request-id"] || reqId();
+  const started = Date.now();
+  res.setHeader("x-request-id", requestId);
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  res.on("finish", () => {
+    logEvent("request", { requestId, method: req.method, path: url.pathname, status: res.statusCode, ms: Date.now() - started });
+  });
 
   if (url.pathname === "/api/sources") {
     const sources = Object.values(providers).map((provider) => ({
@@ -91,6 +121,36 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/metrics/providers") {
+    const metrics = getProviderMetrics();
+    json(res, 200, { metrics });
+    return;
+  }
+
+  if (url.pathname === "/admin/providers") {
+    const providersList = Object.values(providers);
+    const metricsMap = new Map(getProviderMetrics().map((item) => [item.id, item]));
+    const rows = providersList.map((provider) => {
+      const m = metricsMap.get(provider.id) || { total: 0, errorRate: 0, p50: 0, p95: 0 };
+      return `<tr><td>${provider.label}</td><td>${provider.mode ?? provider.kind ?? "api"}</td><td>${provider.isConfigured() ? "yes" : "no"}</td><td>${m.total}</td><td>${m.p50}ms</td><td>${m.p95}ms</td><td>${Math.round(m.errorRate * 100)}%</td></tr>`;
+    }).join("");
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html><html><head><title>Provider Metrics</title><style>body{font-family:Inter,Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f6f8}</style></head><body><h1>Provider dashboard</h1><table><thead><tr><th>Provider</th><th>Mode</th><th>Configured</th><th>Requests</th><th>p50</th><th>p95</th><th>Error rate</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    return;
+  }
+
+  if (url.pathname === "/api/item") {
+    const source = url.searchParams.get("source") || "";
+    const id = url.searchParams.get("id") || "";
+    const item = getItemDetails({ source, id });
+    if (!item) {
+      json(res, 404, { error: "Item not found in cache" });
+    } else {
+      json(res, 200, { item });
+    }
+    return;
+  }
+
   if (url.pathname === "/api/suggest") {
     const q = url.searchParams.get("q") || "";
     json(res, 200, { suggestions: getSuggestions(q) });
@@ -98,6 +158,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === "/api/search") {
+    if (!rateLimitSearch(req)) {
+      json(res, 429, { error: "Too many search requests. Please retry shortly." });
+      return;
+    }
     const { status, payload } = await executeSearch({
       query: Object.fromEntries(url.searchParams.entries()),
       providers,

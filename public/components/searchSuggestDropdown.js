@@ -8,7 +8,7 @@ export function renderSuggestDropdown({ root, suggestions, visible, highlightedI
   }
 
   root.style.display = "block";
-  root.innerHTML = suggestions.map((item, index) => {
+  const rows = suggestions.map((item, index) => {
     const active = index === highlightedIndex ? "is-active" : "";
     const thumb = item.thumbnail ? `<img src="${esc(item.thumbnail)}" alt="" loading="lazy" />` : "";
     return `
@@ -21,4 +21,5 @@ export function renderSuggestDropdown({ root, suggestions, visible, highlightedI
       </button>
     `;
   }).join("");
+  root.innerHTML = `<div class="suggest-group-title">Popular Search</div>${rows}`;
 }

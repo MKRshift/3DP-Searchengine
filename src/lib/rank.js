@@ -6,6 +6,13 @@ function resultKey(item) {
   return normStr(item.url) || `${item.source}:${item.id}:${normStr(item.title)}`;
 }
 
+function canonicalKey(item) {
+  const title = normStr(item.title).replace(/[^a-z0-9]+/g, " ").trim();
+  const creator = normStr(item.creatorName || item.author).replace(/[^a-z0-9]+/g, " ").trim();
+  if (!title) return resultKey(item);
+  return `${title}::${creator}`;
+}
+
 function numeric(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -63,7 +70,6 @@ function sortKey(item, sort) {
 }
 
 export function rankAndDedupe(items, sort = "relevant") {
-  const seen = new Set();
   const sorted = [...items].sort((a, b) => {
     const bySort = sortKey(b, sort) - sortKey(a, sort);
     if (bySort) return bySort;
@@ -74,10 +80,42 @@ export function rankAndDedupe(items, sort = "relevant") {
     return (a.title ?? "").localeCompare(b.title ?? "");
   });
 
-  return sorted.filter((item) => {
-    const key = resultKey(item);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const exactSeen = new Set();
+  const merged = new Map();
+
+  for (const item of sorted) {
+    const exactKey = resultKey(item);
+    if (exactSeen.has(exactKey)) continue;
+    exactSeen.add(exactKey);
+
+    const key = canonicalKey(item);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, {
+        ...item,
+        alsoFoundOn: [item.source],
+        sourceVariants: [{ source: item.source, url: item.url }],
+      });
+      continue;
+    }
+
+    const best = {
+      ...current,
+      thumbnail: current.thumbnail || item.thumbnail,
+      creatorName: current.creatorName || item.creatorName,
+      license: current.license || item.license,
+      formats: (current.formats?.length ? current.formats : item.formats) || [],
+      stats: {
+        likes: Math.max(numeric(current?.stats?.likes), numeric(item?.stats?.likes)) || undefined,
+        downloads:
+          Math.max(numeric(current?.stats?.downloads), numeric(item?.stats?.downloads ?? item?.meta?.downloads)) || undefined,
+        views: Math.max(numeric(current?.stats?.views), numeric(item?.stats?.views)) || undefined,
+      },
+      alsoFoundOn: [...new Set([...(current.alsoFoundOn || []), item.source])],
+      sourceVariants: [...(current.sourceVariants || []), { source: item.source, url: item.url }],
+    };
+    merged.set(key, best);
+  }
+
+  return [...merged.values()];
 }

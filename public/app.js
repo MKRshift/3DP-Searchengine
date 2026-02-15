@@ -1,4 +1,4 @@
-import { fetchSearch, fetchSources, fetchSuggestions } from "./services/api.js";
+import { fetchItem, fetchSearch, fetchSources, fetchSuggestions } from "./services/api.js";
 import { setButtonLoading } from "./components/buttons.js";
 import { renderErrors } from "./components/errorPanel.js";
 import { renderQuickLinks } from "./components/quickLinks.js";
@@ -8,18 +8,26 @@ import { renderTabs } from "./components/searchTabs.js";
 import { renderProviderStatus } from "./components/providerStatusBar.js";
 import { renderSuggestDropdown } from "./components/searchSuggestDropdown.js";
 import { renderPreviewDrawer } from "./components/previewDrawer.js";
+import { renderQueryChips } from "./components/queryChips.js";
 import { applyMaskToSet, MASK_ORDER, readUrlState, setUrlState } from "./utils/urlState.js";
 
 const SAVED_KEY = "meta-search.saved";
+const THEME_KEY = "meta-search.theme";
+const THEME_ORDER = ["system", "light", "dark"];
 
 const elements = {
   form: document.querySelector("#search-form"),
   query: document.querySelector("#search-query"),
+  clear: document.querySelector("#search-clear"),
+  themeToggle: document.querySelector("#theme-toggle"),
+  topbar: document.querySelector(".topbar"),
   sort: document.querySelector("#search-sort"),
   sourceList: document.querySelector("#sources-list"),
   title: document.querySelector("#results-title"),
   status: document.querySelector("#results-status"),
   quickLinks: document.querySelector("#quick-links"),
+  queryChips: document.querySelector("#query-chips"),
+  facets: document.querySelector("#facet-filters"),
   errors: document.querySelector("#errors"),
   grid: document.querySelector("#results-grid"),
   submit: document.querySelector("button[type='submit']"),
@@ -46,7 +54,8 @@ const state = {
   hasMore: true,
   activeTab: "models",
   tabCounts: { models: 0, laser: 0, cnc: 0, scans: 0, cad: 0 },
-  currentPreview: null,
+  filters: { license: "", format: "", price: "", timeRange: "" },
+  chips: [],
 };
 
 function savedItems() {
@@ -65,6 +74,33 @@ function saveItem(item) {
   return true;
 }
 
+
+function applyTheme(theme) {
+  if (theme === "dark") document.documentElement.dataset.theme = "dark";
+  else if (theme === "light") document.documentElement.dataset.theme = "light";
+  else delete document.documentElement.dataset.theme;
+  if (elements.themeToggle) elements.themeToggle.textContent = `Theme: ${theme[0].toUpperCase()}${theme.slice(1)}`;
+}
+
+function initTheme() {
+  const stored = localStorage.getItem(THEME_KEY) || "system";
+  const theme = THEME_ORDER.includes(stored) ? stored : "system";
+  applyTheme(theme);
+}
+
+function cycleTheme() {
+  const current = localStorage.getItem(THEME_KEY) || "system";
+  const idx = THEME_ORDER.indexOf(current);
+  const next = THEME_ORDER[(idx + 1) % THEME_ORDER.length];
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+}
+
+function updateQueryClear() {
+  if (!elements.clear) return;
+  elements.clear.style.display = elements.query.value.trim() ? "inline-block" : "none";
+}
+
 function syncUrl() {
   setUrlState({
     keyword: elements.query.value.trim(),
@@ -72,6 +108,55 @@ function syncUrl() {
     tab: state.activeTab,
     selected: state.selected,
     ids: state.sourceIds,
+    filters: state.filters,
+  });
+}
+
+
+function removeQueryChip(index) {
+  const chip = state.chips[index];
+  if (!chip) return;
+  const token = `${chip.key}:${chip.value}`;
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(^|\\s)${escaped}(?=\\s|$)`, "i");
+  elements.query.value = elements.query.value.replace(pattern, " ").replace(/\s+/g, " ").trim();
+  if (["format", "license", "price", "timeRange"].includes(chip.key)) {
+    state.filters[chip.key] = "";
+  }
+  runSearch(elements.query.value.trim(), { reset: true });
+}
+
+function renderFacets(facets) {
+  if (!facets) {
+    elements.facets.style.display = "none";
+    elements.facets.innerHTML = "";
+    return;
+  }
+
+  const fmtEntries = Object.entries(facets.formats || {}).slice(0, 6);
+  const licenseEntries = Object.entries(facets.licenses || {}).slice(0, 6);
+
+  const chip = (kind, value, count) => {
+    const active = state.filters[kind] === value ? "is-active" : "";
+    const disabled = count <= 0 ? "disabled" : "";
+    return `<button class="facet-chip ${active}" data-facet-kind="${kind}" data-facet-value="${value}" ${disabled}>${value} (${count})</button>`;
+  };
+
+  elements.facets.style.display = "flex";
+  elements.facets.innerHTML = `
+    <div class="facet-group"><span class="facet-label">Format</span>${fmtEntries.map(([k,v])=>chip("format",k,v)).join("")}</div>
+    <div class="facet-group"><span class="facet-label">License</span>${licenseEntries.map(([k,v])=>chip("license",k,v)).join("")}</div>
+    <div class="facet-group"><span class="facet-label">Price</span>${chip("price","free",facets.price?.free||0)}${chip("price","paid",facets.price?.paid||0)}</div>
+    <div class="facet-group"><span class="facet-label">Time</span>${chip("timeRange","30d",facets.timeRange?.["30d"]||0)}</div>
+  `;
+
+  elements.facets.querySelectorAll("[data-facet-kind]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const kind = button.dataset.facetKind;
+      const value = button.dataset.facetValue;
+      state.filters[kind] = state.filters[kind] === value ? "" : value;
+      runSearch(elements.query.value.trim(), { reset: true, pushUrl: false });
+    });
   });
 }
 
@@ -141,11 +226,15 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
       tab: state.activeTab,
       selected: state.selected,
       page: state.page,
+      filters: state.filters,
       signal: state.requestController.signal,
     });
 
     state.tabCounts = data.tabCounts || { models: data.count || 0, laser: 0, cnc: 0, scans: 0, cad: 0 };
+    state.chips = data.queryChips || [];
     updateTabs();
+    renderQueryChips(elements.queryChips, state.chips, { onRemove: removeQueryChip });
+    renderFacets(data.facets);
 
     const results = mergeResults(data, { append: !reset });
     state.hasMore = results.length >= 24;
@@ -200,12 +289,18 @@ async function initSources() {
     return ids.indexOf(a.id) - ids.indexOf(b.id);
   });
   state.sourceIds = state.sources.map((source) => source.id);
-
   state.selected = new Set(state.sourceIds);
 
   const initialState = readUrlState();
   state.activeTab = initialState.tab || "models";
   if (initialState.sources) state.selected = new Set(initialState.sources.split(",").map((id) => id.trim()).filter(Boolean));
+  state.filters = {
+    license: initialState.license || "",
+    format: initialState.format || "",
+    price: initialState.price || "",
+    timeRange: initialState.timeRange || "",
+  };
+
   if (initialState.mask !== null) {
     const mask = Number.parseInt(initialState.mask, 10);
     if (Number.isFinite(mask)) state.selected = applyMaskToSet(mask, state.sourceIds, new Set(state.sourceIds));
@@ -224,7 +319,6 @@ function setupInfiniteScroll() {
     state.page += 1;
     runSearch(query, { reset: false, pushUrl: false });
   });
-
   observer.observe(elements.sentinel);
 }
 
@@ -233,6 +327,20 @@ function bindEvents() {
     event.preventDefault();
     runSearch(elements.query.value.trim(), { reset: true });
   });
+
+
+  if (elements.themeToggle) {
+    elements.themeToggle.addEventListener("click", cycleTheme);
+  }
+
+  if (elements.clear) {
+    elements.clear.addEventListener("click", () => {
+      elements.query.value = "";
+      updateQueryClear();
+      renderSuggestDropdown({ root: elements.suggest, suggestions: [], visible: false });
+      elements.query.focus();
+    });
+  }
 
   elements.sort.addEventListener("change", () => {
     syncUrl();
@@ -244,6 +352,7 @@ function bindEvents() {
     clearTimeout(state.debounceTimer);
     clearTimeout(state.suggestTimer);
     const query = elements.query.value.trim();
+    updateQueryClear();
 
     state.debounceTimer = setTimeout(() => {
       if (query.length >= 2) runSearch(query, { reset: true });
@@ -319,15 +428,19 @@ function bindEvents() {
     if (!card) return;
     try {
       const parsed = JSON.parse(card.dataset.previewItem);
-      state.currentPreview = parsed;
-      renderPreviewDrawer(elements.previewDrawer, parsed);
-    } catch {}
+      if (parsed?.source && parsed?.id) {
+        const enriched = await fetchItem({ source: parsed.source, id: parsed.id }).catch(() => parsed);
+        renderPreviewDrawer(elements.previewDrawer, enriched || parsed);
+      } else {
+        renderPreviewDrawer(elements.previewDrawer, parsed);
+      }
+    } catch {
+      renderPreviewDrawer(elements.previewDrawer, null);
+    }
   });
 
   elements.previewDrawer.addEventListener("click", (event) => {
-    if (event.target.closest("[data-drawer-close]")) {
-      renderPreviewDrawer(elements.previewDrawer, null);
-    }
+    if (event.target.closest("[data-drawer-close]")) renderPreviewDrawer(elements.previewDrawer, null);
   });
 
   elements.densityButtons.forEach((button) => {
@@ -339,6 +452,7 @@ function bindEvents() {
 
   window.addEventListener("scroll", () => {
     elements.topButton.style.display = window.scrollY > window.innerHeight * 1.5 ? "inline-flex" : "none";
+    if (elements.topbar) elements.topbar.classList.toggle("is-scrolled", window.scrollY > 4);
     sessionStorage.setItem(`scroll:${window.location.pathname}${window.location.search}`, String(window.scrollY));
   });
 
@@ -348,6 +462,7 @@ function bindEvents() {
 }
 
 (async function boot() {
+  initTheme();
   await initSources();
   bindEvents();
   setupInfiniteScroll();
@@ -355,6 +470,7 @@ function bindEvents() {
   const initial = readUrlState();
   elements.sort.value = initial.sort || "relevant";
   elements.query.value = (initial.keyword || "hello").trim();
+  updateQueryClear();
   syncUrl();
 
   const savedY = Number(sessionStorage.getItem(`scroll:${window.location.pathname}${window.location.search}`));
