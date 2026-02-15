@@ -1,7 +1,3 @@
-// A tiny helper to make "link-only" providers.
-// These providers don't hit any API; they exist so the UI can generate
-// a "Search on <site>" card / quick-link for platforms without a public API.
-
 export function makeLinkProvider({
   id,
   label,
@@ -9,18 +5,26 @@ export function makeLinkProvider({
   searchUrlTemplate,
   iconUrl,
   notes,
+  assetTypes = ["model3d"],
 }) {
   return {
     id,
     label,
     kind: "link",
+    mode: "link",
     homepage,
     searchUrlTemplate,
     iconUrl: iconUrl ?? null,
     isPublic: true,
+    assetTypes,
+    supports: {
+      search: true,
+      stats: false,
+      license: false,
+      formats: false,
+    },
     notes: notes || "Link-only (no public search API).",
     isConfigured: () => true,
-    // Returning [] keeps results clean; UI renders quick links separately.
     search: async () => [],
   };
 }

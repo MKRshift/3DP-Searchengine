@@ -1,155 +1,192 @@
-import express from "express";
-import rateLimit from "express-rate-limit";
-import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
-import pLimit from "p-limit";
+import fs from "node:fs";
+import path from "node:path";
+import http from "node:http";
+import { fileURLToPath } from "node:url";
 
 import { getProviders } from "./providers/index.js";
-import { cache } from "./lib/cache.js";
-import { safeNumber, parseCsv } from "./lib/validate.js";
-import { rankAndDedupe } from "./lib/rank.js";
+import { executeSearch, getSuggestions, getItemDetails, getProviderMetrics } from "./services/search.service.js";
 
-dotenv.config();
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    if (!line || line.startsWith("#") || !line.includes("=")) continue;
+    const idx = line.indexOf("=");
+    const key = line.slice(0, idx).trim();
+    const raw = line.slice(idx + 1).trim();
+    if (!key || process.env[key] !== undefined) continue;
+    process.env[key] = raw.replace(/^['"]|['"]$/g, "");
+  }
+}
+
+function json(res, status, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  res.end(body);
+}
+
+function contentType(filePath) {
+  if (filePath.endsWith(".html")) return "text/html; charset=utf-8";
+  if (filePath.endsWith(".css")) return "text/css; charset=utf-8";
+  if (filePath.endsWith(".js")) return "application/javascript; charset=utf-8";
+  if (filePath.endsWith(".json")) return "application/json; charset=utf-8";
+  if (filePath.endsWith(".svg")) return "image/svg+xml";
+  if (filePath.endsWith(".png")) return "image/png";
+  return "text/plain; charset=utf-8";
+}
+
+function sendFile(res, filePath) {
+  if (!fs.existsSync(filePath)) {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
+
+  res.writeHead(200, { "content-type": contentType(filePath) });
+  fs.createReadStream(filePath).pipe(res);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const rootDir = path.join(__dirname, "..");
+const publicDir = path.join(rootDir, "public");
 
-const app = express();
-
-app.disable("x-powered-by");
-app.use(express.json({ limit: "250kb" }));
-
-// basic abuse protection
-app.use(
-  "/api/",
-  rateLimit({
-    windowMs: 60_000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-  })
-);
-
+loadEnvFile(path.join(rootDir, ".env"));
 const providers = getProviders();
 
-app.get("/api/sources", (req, res) => {
-  const list = Object.values(providers).map((p) => ({
-    id: p.id,
-    label: p.label,
-    kind: p.kind ?? "api",
-    homepage: p.homepage ?? null,
-    searchUrlTemplate: p.searchUrlTemplate ?? null,
-    iconUrl: p.iconUrl ?? null,
-    configured: p.isConfigured(),
-    notes: p.notes ?? "",
-  }));
-  res.json({ sources: list });
-});
-
-function buildSearchUrl(tpl, q) {
-  if (!tpl) return null;
-  const safe = encodeURIComponent(q ?? "");
-  return tpl.replaceAll("{q}", safe);
+function reqId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function enrich(item) {
-  const p = providers[item.source];
-  return {
-    ...item,
-    sourceLabel: p?.label ?? item.source,
-    sourceIconUrl: p?.iconUrl ?? null,
-  };
+function logEvent(event, details = {}) {
+  console.log(JSON.stringify({ at: new Date().toISOString(), event, ...details }));
 }
 
-app.get("/api/search", async (req, res) => {
-  const t0 = Date.now();
-  const q = (req.query.q ?? "").toString().trim();
-  if (!q) return res.status(400).json({ error: "Missing ?q= query" });
+const searchRateMap = new Map();
+function rateLimitSearch(req) {
+  const ip = req.socket?.remoteAddress || "unknown";
+  const now = Date.now();
+  const windowMs = 60_000;
+  const max = 80;
+  const state = searchRateMap.get(ip) || { count: 0, resetAt: now + windowMs };
+  if (now > state.resetAt) {
+    state.count = 0;
+    state.resetAt = now + windowMs;
+  }
+  state.count += 1;
+  searchRateMap.set(ip, state);
+  return state.count <= max;
+}
 
-  const limit = safeNumber(req.query.limit, 30, 1, 100);
-  const page = safeNumber(req.query.page, 1, 1, 20);
-  const sort = (req.query.sort ?? "relevant").toString().trim().toLowerCase();
-  const sourcesParam = (req.query.sources ?? "").toString().trim();
-  const requested = sourcesParam ? parseCsv(sourcesParam) : Object.keys(providers);
+const server = http.createServer(async (req, res) => {
+  const requestId = req.headers["x-request-id"] || reqId();
+  const started = Date.now();
+  res.setHeader("x-request-id", requestId);
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  res.on("finish", () => {
+    logEvent("request", { requestId, method: req.method, path: url.pathname, status: res.statusCode, ms: Date.now() - started });
+  });
 
-  const enabledLinkProviders = requested
-    .map((id) => providers[id])
-    .filter(Boolean)
-    .filter((p) => (p.kind ?? "api") === "link");
-
-  const enabledApiProviders = requested
-    .map((id) => providers[id])
-    .filter(Boolean)
-    .filter((p) => (p.isConfigured() || p.isPublic) && (p.kind ?? "api") !== "link");
-
-  // Build quick links for *requested* sources that have templates (api + link)
-  const quickLinks = requested
-    .map((id) => providers[id])
-    .filter(Boolean)
-    .filter((p) => Boolean(p.searchUrlTemplate))
-    .map((p) => ({
-      source: p.id,
-      label: p.label,
-      iconUrl: p.iconUrl ?? null,
-      kind: p.kind ?? "api",
-      url: buildSearchUrl(p.searchUrlTemplate, q),
+  if (url.pathname === "/api/sources") {
+    const sources = Object.values(providers).map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      kind: provider.kind ?? "api",
+      homepage: provider.homepage ?? null,
+      searchUrlTemplate: provider.searchUrlTemplate ?? null,
+      iconUrl: provider.iconUrl ?? null,
+      configured: provider.isConfigured(),
+      notes: provider.notes ?? "",
+      mode: provider.mode ?? provider.kind ?? "api",
+      assetTypes: provider.assetTypes ?? ["model3d"],
+      supports: provider.supports ?? { search: true, stats: false, license: false, formats: false },
     }));
-
-  const cacheKey = JSON.stringify({ q, limit, page, sort, sources: enabledApiProviders.map((p) => p.id) });
-  const cached = cache.get(cacheKey);
-  if (cached) {
-    return res.json({ ...cached, quickLinks, cached: true, tookMs: Date.now() - t0 });
+    json(res, 200, { sources });
+    return;
   }
 
-  const limiter = pLimit(4);
-  const results = [];
-  const errors = [];
+  if (url.pathname === "/api/health/providers") {
+    const health = Object.values(providers).map((provider) => ({
+      id: provider.id,
+      label: provider.label,
+      mode: provider.mode ?? provider.kind ?? "api",
+      configured: provider.isConfigured(),
+      isPublic: Boolean(provider.isPublic),
+      supports: provider.supports ?? { search: true, stats: false, license: false, formats: false },
+    }));
+    json(res, 200, { ok: true, providers: health, total: health.length });
+    return;
+  }
 
-  await Promise.all(
-    enabledApiProviders.map((p) =>
-      limiter(async () => {
-        try {
-          const r = await p.search({ q, limit, page, sort });
-          for (const item of r) results.push(enrich(item));
-        } catch (err) {
-          errors.push({ source: p.id, message: err?.message ?? String(err) });
-        }
-      })
-    )
-  );
+  if (url.pathname === "/api/metrics/providers") {
+    const metrics = getProviderMetrics();
+    json(res, 200, { metrics });
+    return;
+  }
 
-  const finalResults = rankAndDedupe(results, sort).slice(0, limit);
+  if (url.pathname === "/admin/providers") {
+    const providersList = Object.values(providers);
+    const metricsMap = new Map(getProviderMetrics().map((item) => [item.id, item]));
+    const rows = providersList.map((provider) => {
+      const m = metricsMap.get(provider.id) || { total: 0, errorRate: 0, p50: 0, p95: 0 };
+      return `<tr><td>${provider.label}</td><td>${provider.mode ?? provider.kind ?? "api"}</td><td>${provider.isConfigured() ? "yes" : "no"}</td><td>${m.total}</td><td>${m.p50}ms</td><td>${m.p95}ms</td><td>${Math.round(m.errorRate * 100)}%</td></tr>`;
+    }).join("");
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(`<!doctype html><html><head><title>Provider Metrics</title><style>body{font-family:Inter,Arial,sans-serif;margin:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f6f8}</style></head><body><h1>Provider dashboard</h1><table><thead><tr><th>Provider</th><th>Mode</th><th>Configured</th><th>Requests</th><th>p50</th><th>p95</th><th>Error rate</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    return;
+  }
 
-  const payload = {
-    query: q,
-    page,
-    limit,
-    sort,
-    sources: enabledApiProviders.map((p) => p.id),
-    links: enabledLinkProviders.map((p) => p.id),
-    count: finalResults.length,
-    results: finalResults,
-    quickLinks,
-    errors,
-    cached: false,
-    tookMs: Date.now() - t0,
-  };
+  if (url.pathname === "/api/item") {
+    const source = url.searchParams.get("source") || "";
+    const id = url.searchParams.get("id") || "";
+    const item = getItemDetails({ source, id });
+    if (!item) {
+      json(res, 404, { error: "Item not found in cache" });
+    } else {
+      json(res, 200, { item });
+    }
+    return;
+  }
 
-  cache.set(cacheKey, payload);
-  res.json(payload);
-});
+  if (url.pathname === "/api/suggest") {
+    const q = url.searchParams.get("q") || "";
+    json(res, 200, { suggestions: getSuggestions(q) });
+    return;
+  }
 
-// static frontend
-app.use("/", express.static(path.join(__dirname, "..", "public"), { extensions: ["html"] }));
+  if (url.pathname === "/api/search") {
+    if (!rateLimitSearch(req)) {
+      json(res, 429, { error: "Too many search requests. Please retry shortly." });
+      return;
+    }
+    const { status, payload } = await executeSearch({
+      query: Object.fromEntries(url.searchParams.entries()),
+      providers,
+    });
+    json(res, status, payload);
+    return;
+  }
 
-// MakerWorld-style URL support: /search/models?keyword=...
-// We serve the same single-page UI for these routes.
-app.get(["/search", "/search/models"], (req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "index.html"));
+  if (url.pathname === "/" || /^\/search(\/(models|laser|cnc|scans|cad))?$/.test(url.pathname)) {
+    sendFile(res, path.join(publicDir, "index.html"));
+    return;
+  }
+
+  const sanitized = path.normalize(url.pathname).replace(/^\.+/, "");
+  const staticPath = path.join(publicDir, sanitized);
+  if (staticPath.startsWith(publicDir)) {
+    sendFile(res, staticPath);
+    return;
+  }
+
+  res.writeHead(404);
+  res.end("Not found");
 });
 
 const port = Number(process.env.PORT || 3000);
-app.listen(port, () => {
+server.listen(port, () => {
   console.log(`[3D Meta Search] http://localhost:${port}`);
 });
