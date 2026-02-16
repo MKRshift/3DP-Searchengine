@@ -10,18 +10,6 @@
 </head>
 <body>
   <div class="app-shell layout">
-    <aside class="left-rail" aria-label="Category navigation">
-      <button id="sidebar-toggle" class="rail-pin" type="button" aria-expanded="false">☰</button>
-      <div class="rail-label">Categories</div>
-      <nav id="category-rail" class="rail-list">
-        <button class="rail-item is-active" data-tab="models"><span>🧩</span><span>Models</span></button>
-        <button class="rail-item" data-tab="cad"><span>📐</span><span>CAD / Parts</span></button>
-        <button class="rail-item" data-tab="cnc"><span>🛠️</span><span>CNC</span></button>
-        <button class="rail-item" data-tab="laser-cut"><span>🔦</span><span>Laser</span></button>
-        <button class="rail-item" data-tab="assets"><span>🧱</span><span>Assets</span></button>
-      </nav>
-    </aside>
-
     <section>
       <header class="topbar">
         <div class="topbar__inner">
@@ -56,6 +44,13 @@
       </header>
 
       <main class="main-content">
+        <div class="category-row" id="category-rail" aria-label="Category navigation">
+          <button class="category-toggle is-active" data-tab="models">Models</button>
+          <button class="category-toggle" data-tab="cad">CAD / Parts</button>
+          <button class="category-toggle" data-tab="cnc">CNC</button>
+          <button class="category-toggle" data-tab="laser-cut">Laser</button>
+          <button class="category-toggle" data-tab="assets">Assets</button>
+        </div>
         <div class="tabs-row" id="search-tabs"></div>
         <section class="panel">
           <div class="provider-status" id="provider-status"></div>

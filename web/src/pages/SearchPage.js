@@ -22,7 +22,7 @@ const elements = {
   themeToggle: document.querySelector("#theme-toggle"), topbar: document.querySelector(".topbar"), sort: document.querySelector("#search-sort"),
   sourceList: document.querySelector("#sources-list"), title: document.querySelector("#results-title"), status: document.querySelector("#results-status"),
   quickLinks: document.querySelector("#quick-links"), queryChips: document.querySelector("#query-chips"), facets: document.querySelector("#facet-filters"),
-  timeframe: document.querySelector("#timeframe-select"), mobileFilters: document.querySelector("#mobile-filters-toggle"), railToggle: document.querySelector("#sidebar-toggle"),
+  timeframe: document.querySelector("#timeframe-select"), mobileFilters: document.querySelector("#mobile-filters-toggle"),
   layout: document.querySelector(".layout"), errors: document.querySelector("#errors"), grid: document.querySelector("#results-grid"),
   submit: document.querySelector("button[type='submit']"), tabs: document.querySelector("#search-tabs"), providerStatus: document.querySelector("#provider-status"),
   suggest: document.querySelector("#search-suggest"), sentinel: document.querySelector("#results-sentinel"), topButton: document.querySelector("#scroll-top"),
@@ -49,11 +49,6 @@ function applyTheme(theme) {
 
 function syncUrl() {
   setUrlState({ keyword: elements.query.value.trim(), sort: elements.sort.value, tab: state.activeTab, selected: state.selected, ids: state.sourceIds, filters: state.filters });
-}
-
-function setRailExpanded(expanded) {
-  elements.layout.classList.toggle("is-rail-expanded", expanded);
-  elements.railToggle.setAttribute("aria-expanded", String(expanded));
 }
 
 function setFilterDrawer(open) {
@@ -241,7 +236,6 @@ function bindEvents() {
     applyTheme(next);
   });
 
-  elements.railToggle.addEventListener("click", () => setRailExpanded(!elements.layout.classList.contains("is-rail-expanded")));
   elements.railItems.forEach((item) => item.addEventListener("click", () => {
     const map = { cad: "models", cnc: "models", assets: "models", "laser-cut": "laser-cut", models: "models" };
     state.activeTab = map[item.dataset.tab] || "models";

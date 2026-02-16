@@ -44,7 +44,7 @@ function buildCard(item) {
   const payload = previewPayload(item);
   const thumbStyle = item.thumbnail ? `background-image:url('${esc(item.thumbnail)}')` : "";
 
-  return `<article class="card" data-preview-item="${payload}"><a class="card__link" href="${esc(item.url || "#")}" target="_blank" rel="noopener noreferrer"><div class="card__thumb" style="${thumbStyle}">${item.sourceIconUrl ? `<div class='card__icon'><img src='${esc(item.sourceIconUrl)}' alt='' loading='lazy' /></div>` : ""}<div class="card__actions"><button class="card__action" data-action="open" data-url="${esc(item.url || "")}">Open</button></div></div></a><div class="card__body"><h3 class="card__title">${esc(item.title || "Untitled")}</h3><div class="card__meta"><span>${esc(item.creatorName || item.author || "Unknown")}</span><span>${esc(item.sourceLabel || item.source || "")}</span></div><div class="card__stats">${qualityLine(item)}</div>${sourceVariants(item)}</div></article>`;
+  return `<article class="card" data-preview-item="${payload}"><a class="card__link" href="${esc(item.url || "#")}" target="_blank" rel="noopener noreferrer"><div class="card__thumb" style="${thumbStyle}"><div class="card__actions"><button class="card__action" data-action="open" data-url="${esc(item.url || "")}">Open</button></div></div></a><div class="card__body"><h3 class="card__title">${esc(item.title || "Untitled")}</h3><div class="card__meta"><span>${esc(item.creatorName || item.author || "Unknown")}</span><span class="card__source-toggle">${esc(item.sourceLabel || item.source || "source")}</span></div><div class="card__stats">${qualityLine(item)}</div>${sourceVariants(item)}</div></article>`;
 }
 
 export function renderResultGrid(root, items, { append = false } = {}) {
