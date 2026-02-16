@@ -14,7 +14,8 @@
     "prepare": "husky",
     "precommit:check": "npm run lint && npm test",
     "lint-staged": "lint-staged",
-    "lint:styles": "node scripts/check-style-colors.mjs"
+    "lint:styles": "node scripts/check-style-colors.mjs",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=80 --test-coverage-functions=80 --test-coverage-branches=55 test/normalize.test.js test/adapters/*.test.js test/search.service.integration.test.js"
   },
   "engines": {
     "node": ">=20"
