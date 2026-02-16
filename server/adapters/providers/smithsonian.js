@@ -22,13 +22,22 @@ export function smithsonianProvider() {
     isConfigured() {
       return true;
     },
-    async search({ q, limit }) {
+    async search({ q, limit, page = 1 }) {
+      if (page > 1) return [];
+
       const url = new URL("https://api.si.edu/openaccess/api/v1.0/search");
       url.searchParams.set("api_key", process.env.SMITHSONIAN_API_KEY?.trim() || "DEMO_KEY");
       url.searchParams.set("q", `${q} AND online_media_type:Images`);
-      url.searchParams.set("rows", String(Math.min(limit, 25)));
+      url.searchParams.set("rows", String(Math.min(limit, 12)));
 
-      const data = await fetchJson(url.toString(), { timeoutMs: 20_000 });
+      let data;
+      try {
+        data = await fetchJson(url.toString(), { timeoutMs: 20_000, retries: 0 });
+      } catch (error) {
+        if (/429|OVER_RATE_LIMIT/i.test(String(error?.message ?? ""))) return [];
+        throw error;
+      }
+
       const rows = Array.isArray(data?.response?.rows) ? data.response.rows : [];
 
       return rows.slice(0, limit).map((row) => ({

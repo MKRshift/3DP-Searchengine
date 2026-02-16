@@ -111,8 +111,12 @@ export function printablesLinkProvider() {
     async search({ q, limit, page }) {
       const perPage = Math.min(limit, 24);
       const url = buildSearchUrl(q) + `&page=${page}`;
-      const html = await fetchText(url, { timeoutMs: 12_000 });
-      return parseResults(html, perPage, q).slice(0, perPage);
+      try {
+        const html = await fetchText(url, { timeoutMs: 12_000 });
+        return parseResults(html, perPage, q).slice(0, perPage);
+      } catch {
+        return parseResults("", perPage, q).slice(0, perPage);
+      }
     },
   };
 }

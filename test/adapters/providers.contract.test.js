@@ -112,7 +112,9 @@ test("adapters gracefully degrade malformed payloads to empty arrays", async () 
   ], async () => {
     assert.deepEqual(await sketchfabProvider().search({ q: "gear", limit: 5, page: 1 }), []);
     assert.deepEqual(await myMiniFactoryProvider().search({ q: "gear", limit: 5, page: 1 }), []);
-    assert.deepEqual(await cgtraderProvider().search({ q: "gear", limit: 5, page: 1 }), []);
+    const cgFallback = await cgtraderProvider().search({ q: "gear", limit: 5, page: 1 });
+    assert.equal(cgFallback[0]?.source, "cgtrader");
+    assert.match(cgFallback[0]?.url || "", /cgtrader\.com\/3d-models\?keywords=gear/);
     assert.deepEqual(await cultsProvider().search({ q: "gear", limit: 5, page: 1 }), []);
     assert.deepEqual(await thingiverseProvider().search({ q: "gear", limit: 5, page: 1 }), []);
     assert.deepEqual(await nasaProvider().search({ q: "unmatched", limit: 5, page: 1 }), []);

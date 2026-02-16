@@ -1,5 +1,18 @@
 import { fetchText } from "../../lib/http.js";
 
+function buildFallbackLink(q) {
+  return {
+    source: "cgtrader",
+    id: `cgtrader:link:${q}`,
+    title: `Search “${q}” on CGTrader`,
+    url: `https://www.cgtrader.com/3d-models?keywords=${encodeURIComponent(q)}`,
+    thumbnail: null,
+    author: "Direct platform search",
+    meta: { tags: ["external-search"] },
+    score: 0.1,
+  };
+}
+
 function parseItems(html, limit) {
   const items = [];
   const re = /href="(\/3d-models\/[^"]+)"[^>]*>/gi;
@@ -37,11 +50,16 @@ export function cgtraderProvider() {
       return true;
     },
     async search({ q, limit, page }) {
-      const url = new URL("https://www.cgtrader.com/3d-models");
-      url.searchParams.set("keywords", q);
-      url.searchParams.set("page", String(page));
-      const html = await fetchText(url.toString(), { timeoutMs: 15_000 });
-      return parseItems(html, limit);
+      try {
+        const url = new URL("https://www.cgtrader.com/3d-models");
+        url.searchParams.set("keywords", q);
+        url.searchParams.set("page", String(page));
+        const html = await fetchText(url.toString(), { timeoutMs: 15_000 });
+        const items = parseItems(html, limit);
+        return items.length ? items : [buildFallbackLink(q)];
+      } catch {
+        return [buildFallbackLink(q)];
+      }
     },
   };
 }
