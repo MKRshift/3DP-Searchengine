@@ -1,3 +1,21 @@
+function normalizeSuggestionGroups(payload) {
+  const grouped = payload?.groupedSuggestions;
+  if (grouped && (Array.isArray(grouped.popular) || Array.isArray(grouped.recent) || Array.isArray(grouped.items))) {
+    return {
+      popular: Array.isArray(grouped.popular) ? grouped.popular : [],
+      recent: Array.isArray(grouped.recent) ? grouped.recent : [],
+      items: Array.isArray(grouped.items) ? grouped.items : [],
+    };
+  }
+
+  const legacy = Array.isArray(payload?.suggestions) ? payload.suggestions : [];
+  return {
+    popular: [],
+    recent: legacy.filter((item) => item?.type === "query"),
+    items: legacy.filter((item) => item?.type !== "query"),
+  };
+}
+
 export async function fetchSources() {
   const response = await fetch("/api/sources");
   const data = await response.json();
@@ -27,7 +45,7 @@ export async function fetchSuggestions(query) {
   url.searchParams.set("q", query);
   const response = await fetch(url.toString());
   const data = await response.json();
-  return Array.isArray(data.suggestions) ? data.suggestions : [];
+  return normalizeSuggestionGroups(data);
 }
 
 export async function fetchItem({ source, id }) {

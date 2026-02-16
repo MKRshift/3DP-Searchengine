@@ -54,7 +54,11 @@ export async function handleApiRoute({ req, res, url, providers, rateLimitSearch
 
   if (url.pathname === "/api/suggest") {
     const q = url.searchParams.get("q") || "";
-    json(res, 200, { suggestions: getSuggestions(q) });
+    const groupedSuggestions = getSuggestions(q);
+    json(res, 200, {
+      suggestions: [...(groupedSuggestions.recent || []), ...(groupedSuggestions.items || [])].slice(0, 10),
+      groupedSuggestions,
+    });
     return true;
   }
 

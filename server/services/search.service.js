@@ -77,18 +77,24 @@ function rememberSearch(query, results) {
 
 export function getSuggestions(query) {
   const q = (query ?? "").toString().trim().toLowerCase();
-  const fromRecent = recentQueries
+  const recent = recentQueries
     .filter((item) => item.toLowerCase().includes(q))
     .slice(0, 5)
     .map((item) => ({ type: "query", title: item }));
 
   const exactResults = queryResultIndex.get((query ?? "").toString().trim()) ?? [];
-  const fallbackResults = Array.from(queryResultIndex.entries())
+  const fallbackItems = Array.from(queryResultIndex.entries())
     .filter(([key]) => key.toLowerCase().includes(q))
     .flatMap(([, items]) => items)
     .slice(0, 5);
+  const items = exactResults.length ? exactResults : fallbackItems;
+  const popular = items.slice(0, 3);
 
-  return [...fromRecent, ...(exactResults.length ? exactResults : fallbackResults)].slice(0, 10);
+  return {
+    popular,
+    recent,
+    items,
+  };
 }
 
 export function getItemDetails({ source, id }) {
