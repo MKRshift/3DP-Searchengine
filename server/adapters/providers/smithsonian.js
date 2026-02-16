@@ -7,8 +7,6 @@ function pickThumbnail(item) {
 }
 
 export function smithsonianProvider() {
-  const apiKey = process.env.SMITHSONIAN_API_KEY?.trim();
-
   return {
     id: "smithsonian",
     label: "Smithsonian 3D",
@@ -17,18 +15,16 @@ export function smithsonianProvider() {
     homepage: "https://3d.si.edu",
     iconUrl: "https://www.google.com/s2/favicons?domain=si.edu&sz=64",
     searchUrlTemplate: "https://www.si.edu/search?edan_q={q}",
-    isPublic: false,
+    isPublic: true,
     assetTypes: ["scan3d", "model3d"],
     supports: { search: true, stats: false, license: true, formats: true },
-    notes: apiKey ? "Smithsonian API key set ✅" : "needs SMITHSONIAN_API_KEY ⚠️",
+    notes: "Smithsonian Open Access public API (tokenless demo key)",
     isConfigured() {
-      return Boolean(apiKey);
+      return true;
     },
     async search({ q, limit }) {
-      if (!apiKey) throw new Error("SMITHSONIAN_API_KEY not set");
-
       const url = new URL("https://api.si.edu/openaccess/api/v1.0/search");
-      url.searchParams.set("api_key", apiKey);
+      url.searchParams.set("api_key", process.env.SMITHSONIAN_API_KEY?.trim() || "DEMO_KEY");
       url.searchParams.set("q", `${q} AND online_media_type:Images`);
       url.searchParams.set("rows", String(Math.min(limit, 25)));
 

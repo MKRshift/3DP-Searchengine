@@ -44,6 +44,20 @@
       </header>
 
       <main class="main-content">
+        <section id="landing-view" class="landing-view">
+          <p class="landing-view__eyebrow">Welcome to 3DP Search</p>
+          <h1>Find 3D models, CAD parts, and maker assets in one place.</h1>
+          <p class="landing-view__copy">Search across public provider catalogs without API tokens and jump directly to source platforms.</p>
+          <div class="landing-view__actions">
+            <label class="search__field">
+              <span class="search__icon" aria-hidden="true"></span>
+              <input id="landing-query" type="text" placeholder="Try: articulated dragon, planetary gear, laser box" />
+            </label>
+            <button id="landing-start" class="button button--primary" type="button">Start searching</button>
+          </div>
+        </section>
+
+        <section id="search-view" style="display:none">
         <div class="category-row" id="category-rail" aria-label="Category navigation">
           <button class="category-toggle is-active" data-tab="models">Models</button>
           <button class="category-toggle" data-tab="cad">CAD / Parts</button>
@@ -70,6 +84,7 @@
           <div id="errors" style="display:none"></div>
           <div id="results-grid" class="grid scroll-surface"></div>
           <div id="results-sentinel" class="sentinel"></div>
+        </section>
         </section>
       </main>
     </section>
