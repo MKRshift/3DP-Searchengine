@@ -1,5 +1,13 @@
 import { fetchText } from "../../lib/http.js";
 
+function toAbsoluteUrl(url) {
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("//")) return `https:${url}`;
+  if (url.startsWith("/")) return `https://www.cgtrader.com${url}`;
+  return null;
+}
+
 function buildFallbackLink(q) {
   return {
     source: "cgtrader",
@@ -15,24 +23,37 @@ function buildFallbackLink(q) {
 
 function parseItems(html, limit) {
   const items = [];
-  const re = /href="(\/3d-models\/[^"]+)"[^>]*>/gi;
-  let m;
-  while ((m = re.exec(html)) && items.length < limit) {
-    const path = m[1];
-    const around = html.slice(Math.max(0, m.index - 250), Math.min(html.length, m.index + 400));
-    const titleMatch = around.match(/title="([^"]+)"/i);
-    const title = (titleMatch?.[1] || path.split("/").pop() || "CGTrader result").replace(/-/g, " ");
+  const seen = new Set();
+  const re = /href="(\/3d-models\/[^"?#]+)"[^>]*>/gi;
+  let match;
+
+  while ((match = re.exec(html)) && items.length < limit) {
+    const path = match[1];
+    if (seen.has(path)) continue;
+    seen.add(path);
+
+    const around = html.slice(Math.max(0, match.index - 1400), Math.min(html.length, match.index + 2200));
+    const titleMatch = around.match(/(?:title|aria-label)="([^"]{3,200})"/i);
+    const slug = path.split("/").pop() || "CGTrader result";
+    const title = (titleMatch?.[1] || decodeURIComponent(slug).replace(/[-_]/g, " ")).trim();
+
+    const srcsetMatch = around.match(/<img[^>]+srcset="([^"]+)"/i);
+    const srcMatch = around.match(/<img[^>]+(?:src|data-src)="([^"]+)"/i);
+    const srcsetUrl = srcsetMatch?.[1]?.split(",")?.pop()?.trim()?.split(" ")?.[0] || null;
+    const thumbnail = toAbsoluteUrl(srcsetUrl || srcMatch?.[1] || "");
+
     items.push({
       source: "cgtrader",
       id: path,
       title,
       url: `https://www.cgtrader.com${path}`,
-      thumbnail: null,
+      thumbnail,
       author: "",
       meta: {},
       score: 1,
     });
   }
+
   return items;
 }
 

@@ -1,4 +1,12 @@
-import { fetchJson } from "../../lib/http.js";
+import { fetchJson, fetchText } from "../../lib/http.js";
+
+function toAbsoluteUrl(url) {
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("//")) return `https:${url}`;
+  if (url.startsWith("/")) return `https://makerworld.com${url}`;
+  return null;
+}
 
 function pickThumb(it) {
   const candidates = [
@@ -9,7 +17,7 @@ function pickThumb(it) {
     it?.image,
     it?.thumb,
   ].filter(Boolean);
-  return candidates[0] ?? null;
+  return toAbsoluteUrl(candidates[0] ?? null);
 }
 
 function sortToOrderBy(sort) {
@@ -46,6 +54,39 @@ function extractItems(data) {
   return [];
 }
 
+function parseHtmlFallback(html, limit) {
+  const items = [];
+  const seen = new Set();
+  const re = /href="(\/en\/models\/[0-9][^"?#]*)"/gi;
+  let match;
+
+  while ((match = re.exec(html)) && items.length < limit) {
+    const path = match[1];
+    if (seen.has(path)) continue;
+    seen.add(path);
+
+    const around = html.slice(Math.max(0, match.index - 1800), Math.min(html.length, match.index + 2800));
+    const titleMatch = around.match(/(?:title|aria-label)="([^"]{3,200})"/i);
+
+    const srcsetMatch = around.match(/<img[^>]+srcset="([^"]+)"/i);
+    const srcMatch = around.match(/<img[^>]+(?:src|data-src)="([^"]+)"/i);
+    const srcsetUrl = srcsetMatch?.[1]?.split(",")?.pop()?.trim()?.split(" ")?.[0] || null;
+
+    items.push({
+      source: "makerworld",
+      id: path,
+      title: (titleMatch?.[1] || path.split("/").pop() || "MakerWorld result").replace(/[-_]/g, " "),
+      url: `https://makerworld.com${path}`,
+      thumbnail: toAbsoluteUrl(srcsetUrl || srcMatch?.[1] || ""),
+      author: "",
+      meta: {},
+      score: 1,
+    });
+  }
+
+  return items;
+}
+
 export function makerworldLinkProvider() {
   const searchUrlTemplate = "https://makerworld.com/en/search/models?keyword={q}";
   const override = process.env.MAKERWORLD_SEARCH_URL?.trim() || "";
@@ -62,7 +103,7 @@ export function makerworldLinkProvider() {
     isPublic: true,
     notes: override
       ? "using MAKERWORLD_SEARCH_URL override ✅"
-      : "public JSON search endpoint (auto-discovered); falls back to link if unavailable",
+      : "public JSON search endpoint with HTML fallback; falls back to link if unavailable",
     isConfigured() {
       return true;
     },
@@ -87,8 +128,7 @@ export function makerworldLinkProvider() {
         candidates.push(
           `https://makerworld.com/api/v1/search?keyword=${encodeURIComponent(q)}&scene=models&orderBy=${encodeURIComponent(orderBy)}&page=${page}&size=${perPage}`,
           `https://makerworld.com/api/v1/search/models?keyword=${encodeURIComponent(q)}&orderBy=${encodeURIComponent(orderBy)}&page=${page}&size=${perPage}`,
-          // alternate param names some deployments use
-          `https://makerworld.com/api/v1/search?keyword=${encodeURIComponent(q)}&scene=models&orderBy=${encodeURIComponent(orderBy)}&p=${page}&pageSize=${perPage}`
+          `https://makerworld.com/api/v1/search?keyword=${encodeURIComponent(q)}&scene=models&orderBy=${encodeURIComponent(orderBy)}&p=${page}&pageSize=${perPage}`,
         );
       }
 
@@ -103,36 +143,45 @@ export function makerworldLinkProvider() {
       }
 
       const items = extractItems(data);
-      if (!items.length) return [];
+      if (items.length) {
+        return items.slice(0, limit).map((it) => {
+          const id = it?.id ?? it?.modelId ?? it?.model_id ?? it?.objectId ?? null;
+          const slug = it?.slug ?? it?.modelSlug ?? it?.seo_slug ?? null;
+          const title = it?.name ?? it?.title ?? it?.modelName ?? "Untitled";
+          const url = buildPublicUrl(id, slug) ?? searchUrlTemplate.replace("{q}", encodeURIComponent(q));
+          const author =
+            it?.owner?.username ?? it?.owner?.name ?? it?.user?.name ?? it?.userName ?? it?.author ?? "";
+          const likes = Number(it?.likeCount ?? it?.likes ?? 0);
+          const downloads = Number(it?.downloadCount ?? it?.downloads ?? 0);
+          const views = Number(it?.viewCount ?? it?.views ?? 0);
+          const publishedAt = it?.publishedAt ?? it?.createdAt ?? null;
 
-      return items.slice(0, limit).map((it) => {
-        const id = it?.id ?? it?.modelId ?? it?.model_id ?? it?.objectId ?? null;
-        const slug = it?.slug ?? it?.modelSlug ?? it?.seo_slug ?? null;
-        const title = it?.name ?? it?.title ?? it?.modelName ?? "Untitled";
-        const url = buildPublicUrl(id, slug) ?? searchUrlTemplate.replace("{q}", encodeURIComponent(q));
-        const author =
-          it?.owner?.username ?? it?.owner?.name ?? it?.user?.name ?? it?.userName ?? it?.author ?? "";
-        const likes = Number(it?.likeCount ?? it?.likes ?? 0);
-        const downloads = Number(it?.downloadCount ?? it?.downloads ?? 0);
-        const views = Number(it?.viewCount ?? it?.views ?? 0);
-        const publishedAt = it?.publishedAt ?? it?.createdAt ?? null;
+          return {
+            source: "makerworld",
+            id: String(id ?? slug ?? title),
+            title,
+            url,
+            thumbnail: pickThumb(it),
+            author,
+            meta: {
+              likes,
+              downloads,
+              views,
+              publishedAt,
+            },
+            score: likes + downloads * 0.5 + views * 0.01,
+          };
+        });
+      }
 
-        return {
-          source: "makerworld",
-          id: String(id ?? slug ?? title),
-          title,
-          url,
-          thumbnail: pickThumb(it),
-          author,
-          meta: {
-            likes,
-            downloads,
-            views,
-            publishedAt,
-          },
-          score: likes + downloads * 0.5 + views * 0.01,
-        };
-      });
+      try {
+        const htmlUrl = `${searchUrlTemplate.replace("{q}", encodeURIComponent(q))}&page=${page}`;
+        const html = await fetchText(htmlUrl, { timeoutMs: 12_000, headers });
+        const parsed = parseHtmlFallback(html, limit);
+        return parsed;
+      } catch {
+        return [];
+      }
     },
   };
 }

@@ -25,6 +25,14 @@ function tryDecode(s) {
   try { return decodeURIComponent(s); } catch { return s; }
 }
 
+function toAbsoluteUrl(url) {
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("//")) return `https:${url}`;
+  if (url.startsWith("/")) return `https://www.printables.com${url}`;
+  return null;
+}
+
 function slugToTitle(slug) {
   return tryDecode(String(slug || "").replace(/-/g, " ").trim()) || "Untitled";
 }
@@ -36,15 +44,13 @@ function parseResults(html, limit, q) {
   while ((match = modelRe.exec(html)) && items.length < limit) {
     const path = match[1];
     const idx = match.index;
-    const around = html.slice(Math.max(0, idx - 400), Math.min(html.length, idx + 600));
+    const around = html.slice(Math.max(0, idx - 1200), Math.min(html.length, idx + 2200));
 
     let title = null;
-    // try title attribute on the same anchor
     const titleAttrRe = new RegExp(`href="${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*\\btitle="([^"]+)"`);
     const tAttr = around.match(titleAttrRe);
     if (tAttr && tAttr[1]) title = tAttr[1].trim();
     if (!title) {
-      // fallback: derive from slug
       const slug = path.split("/").pop() || "";
       title = slugToTitle(slug.replace(/^\d+-/, ""));
     }
@@ -54,17 +60,10 @@ function parseResults(html, limit, q) {
     const a = around.match(authorRe);
     if (a && a[1]) author = tryDecode(a[1]);
 
-    let thumb = null;
-    const imgRe = /<img[^>]+srcset="([^"]+\.webp[^"]*)"/i;
-    const img = around.match(imgRe);
-    if (img && img[1]) {
-      const parts = img[1].split(",").map((s) => s.trim().split(" ")[0]).filter(Boolean);
-      thumb = parts[parts.length - 1] || null;
-    } else {
-      const imgRe2 = /<img[^>]+src="([^"]+\.webp)"/i;
-      const img2 = around.match(imgRe2);
-      if (img2 && img2[1]) thumb = img2[1];
-    }
+    const srcsetMatch = around.match(/<img[^>]+srcset="([^"]+)"/i);
+    const srcMatch = around.match(/<img[^>]+(?:src|data-src)="([^"]+)"/i);
+    const srcsetUrl = srcsetMatch?.[1]?.split(",")?.pop()?.trim()?.split(" ")?.[0] || null;
+    const thumb = toAbsoluteUrl(srcsetUrl || srcMatch?.[1] || "");
 
     items.push({
       source: "printables",
