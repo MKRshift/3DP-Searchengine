@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { executeSearch } from "../server/services/search.service.js";
+import { executeSearch, getSuggestions } from "../server/services/search.service.js";
 
 test("executeSearch returns link results for link providers", async () => {
   const providers = {
@@ -71,4 +71,27 @@ test("executeSearch isolates provider failures while returning valid provider re
   assert.equal(response.payload.errors.length, 1);
   assert.equal(response.payload.errors[0].source, "bad");
   assert.match(response.payload.errors[0].message, /must be an array/i);
+});
+
+
+test("getSuggestions returns grouped payload", async () => {
+  const providers = {
+    printables: {
+      id: "printables",
+      label: "Printables",
+      kind: "link",
+      searchUrlTemplate: "https://example.com/search?q={q}",
+      isConfigured() {
+        return true;
+      },
+    },
+  };
+
+  await executeSearch({ query: { q: "gear" }, providers });
+
+  const suggestions = getSuggestions("ge");
+  assert.ok(Array.isArray(suggestions.popular));
+  assert.ok(Array.isArray(suggestions.recent));
+  assert.ok(Array.isArray(suggestions.items));
+  assert.ok(suggestions.recent.some((item) => /gear/i.test(item.title)));
 });

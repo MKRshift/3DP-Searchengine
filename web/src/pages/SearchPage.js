@@ -59,8 +59,8 @@ const state = {
   requestController: null,
   debounceTimer: null,
   suggestTimer: null,
-  suggestItems: [],
-  highlightedSuggest: -1,
+  suggestItems: { popular: [], recent: [], items: [] },
+  highlightedSuggest: { popular: -1, recent: -1, items: -1 },
   page: 1,
   loadingMore: false,
   hasMore: true,
@@ -69,6 +69,24 @@ const state = {
   filters: { license: "", format: "", price: "", timeRange: "" },
   chips: [],
 };
+
+
+function emptySuggestionGroups() {
+  return { popular: [], recent: [], items: [] };
+}
+
+function flattenSuggestions(groups) {
+  return [
+    ...(groups?.popular || []).map((item, index) => ({ item, group: "popular", index })),
+    ...(groups?.recent || []).map((item, index) => ({ item, group: "recent", index })),
+    ...(groups?.items || []).map((item, index) => ({ item, group: "items", index })),
+  ];
+}
+
+function suggestionAt(groups, pointer) {
+  if (!pointer || !pointer.group || pointer.index < 0) return null;
+  return groups?.[pointer.group]?.[pointer.index] || null;
+}
 
 function savedItems() {
   try {
@@ -314,21 +332,23 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
 async function loadSuggestions() {
   const query = elements.query.value.trim();
   if (query.length < 1) {
-    state.suggestItems = [];
-    renderSuggestDropdown({ root: elements.suggest, suggestions: [], visible: false });
+    state.suggestItems = emptySuggestionGroups();
+    renderSuggestDropdown({ root: elements.suggest, suggestions: emptySuggestionGroups(), visible: false });
     return;
   }
 
   state.suggestItems = await fetchSuggestions(query);
-  state.highlightedSuggest = -1;
+  state.highlightedSuggest = { popular: -1, recent: -1, items: -1 };
   renderSuggestDropdown({ root: elements.suggest, suggestions: state.suggestItems, visible: true, highlightedIndex: state.highlightedSuggest });
 
   elements.suggest.querySelectorAll("[data-suggest-index]").forEach((item) => {
     item.addEventListener("click", () => {
-      const selected = state.suggestItems[Number(item.dataset.suggestIndex)];
+      const group = item.dataset.suggestGroup;
+      const index = Number(item.dataset.suggestIndex);
+      const selected = state.suggestItems[group]?.[index];
       if (!selected) return;
       elements.query.value = selected.title;
-      renderSuggestDropdown({ root: elements.suggest, suggestions: [], visible: false });
+      renderSuggestDropdown({ root: elements.suggest, suggestions: emptySuggestionGroups(), visible: false });
       runSearch(elements.query.value.trim(), { reset: true });
     });
   });
@@ -391,7 +411,7 @@ function bindEvents() {
     elements.clear.addEventListener("click", () => {
       elements.query.value = "";
       updateQueryClear();
-      renderSuggestDropdown({ root: elements.suggest, suggestions: [], visible: false });
+      renderSuggestDropdown({ root: elements.suggest, suggestions: emptySuggestionGroups(), visible: false });
       elements.query.focus();
     });
   }
@@ -442,21 +462,30 @@ function bindEvents() {
 
   elements.query.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      renderSuggestDropdown({ root: elements.suggest, suggestions: [], visible: false });
+      renderSuggestDropdown({ root: elements.suggest, suggestions: emptySuggestionGroups(), visible: false });
       renderPreviewDrawer(elements.previewDrawer, null);
       return;
     }
 
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      state.highlightedSuggest = Math.min(state.highlightedSuggest + 1, state.suggestItems.length - 1);
+      const flat = flattenSuggestions(state.suggestItems);
+      const activeIdx = flat.findIndex((entry) => state.highlightedSuggest[entry.group] === entry.index);
+      const next = Math.min(activeIdx + 1, flat.length - 1);
+      state.highlightedSuggest = { popular: -1, recent: -1, items: -1 };
+      if (flat[next]) state.highlightedSuggest[flat[next].group] = flat[next].index;
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      state.highlightedSuggest = Math.max(state.highlightedSuggest - 1, 0);
-    } else if (event.key === "Enter" && state.highlightedSuggest >= 0) {
-      event.preventDefault();
-      const selected = state.suggestItems[state.highlightedSuggest];
+      const flat = flattenSuggestions(state.suggestItems);
+      const activeIdx = flat.findIndex((entry) => state.highlightedSuggest[entry.group] === entry.index);
+      const next = Math.max(activeIdx - 1, 0);
+      state.highlightedSuggest = { popular: -1, recent: -1, items: -1 };
+      if (flat[next]) state.highlightedSuggest[flat[next].group] = flat[next].index;
+    } else if (event.key === "Enter") {
+      const pointer = Object.entries(state.highlightedSuggest).find(([, idx]) => idx >= 0);
+      const selected = suggestionAt(state.suggestItems, pointer ? { group: pointer[0], index: pointer[1] } : null);
       if (selected) {
+        event.preventDefault();
         elements.query.value = selected.title;
         runSearch(selected.title, { reset: true });
       }
@@ -471,7 +500,7 @@ function bindEvents() {
       elements.query.focus();
     }
     if (event.key === "Escape") renderPreviewDrawer(elements.previewDrawer, null);
-    if (event.key === "Enter" && document.activeElement === elements.query && state.highlightedSuggest < 0) {
+    if (event.key === "Enter" && document.activeElement === elements.query && Object.values(state.highlightedSuggest).every((idx) => idx < 0)) {
       const first = elements.grid.querySelector("a.card__link");
       if (first) first.click();
     }
