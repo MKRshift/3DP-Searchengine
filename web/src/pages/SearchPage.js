@@ -14,6 +14,13 @@ import { applyMaskToSet, MASK_ORDER, readUrlState, setUrlState } from "../lib/ur
 const SAVED_KEY = "meta-search.saved";
 const THEME_KEY = "meta-search.theme";
 const THEME_ORDER = ["system", "light", "dark"];
+const TAB_LABELS = {
+  models: "Models",
+  "laser-cut": "Laser Cut",
+  users: "Users",
+  collections: "Collections",
+  posts: "Posts",
+};
 
 const elements = {
   form: document.querySelector("#search-form"),
@@ -28,6 +35,11 @@ const elements = {
   quickLinks: document.querySelector("#quick-links"),
   queryChips: document.querySelector("#query-chips"),
   facets: document.querySelector("#facet-filters"),
+  timeframe: document.querySelector("#timeframe-select"),
+  mobileFilters: document.querySelector("#mobile-filters-toggle"),
+  sidebarToggle: document.querySelector("#sidebar-toggle"),
+  layout: document.querySelector(".layout"),
+  sidebar: document.querySelector(".filters"),
   errors: document.querySelector("#errors"),
   grid: document.querySelector("#results-grid"),
   submit: document.querySelector("button[type='submit']"),
@@ -53,7 +65,7 @@ const state = {
   loadingMore: false,
   hasMore: true,
   activeTab: "models",
-  tabCounts: { models: 0, laser: 0, cnc: 0, scans: 0, cad: 0 },
+  tabCounts: { models: 0, "laser-cut": 0, users: 0, collections: 0, posts: 0 },
   filters: { license: "", format: "", price: "", timeRange: "" },
   chips: [],
 };
@@ -94,6 +106,24 @@ function cycleTheme() {
   const next = THEME_ORDER[(idx + 1) % THEME_ORDER.length];
   localStorage.setItem(THEME_KEY, next);
   applyTheme(next);
+}
+
+
+function setSidebarHidden(hidden) {
+  if (!elements.layout) return;
+  elements.layout.classList.toggle("is-sidebar-hidden", hidden);
+  if (elements.sidebarToggle) {
+    elements.sidebarToggle.setAttribute("aria-expanded", String(!hidden));
+    elements.sidebarToggle.textContent = hidden ? "Show filters" : "Hide filters";
+  }
+}
+
+function setMobileFiltersOpen(open) {
+  if (!elements.layout) return;
+  elements.layout.classList.toggle("is-mobile-filters-open", open);
+  if (elements.mobileFilters) {
+    elements.mobileFilters.setAttribute("aria-expanded", String(open));
+  }
 }
 
 function updateQueryClear() {
@@ -147,7 +177,7 @@ function renderFacets(facets) {
     <div class="facet-group"><span class="facet-label">Format</span>${fmtEntries.map(([k,v])=>chip("format",k,v)).join("")}</div>
     <div class="facet-group"><span class="facet-label">License</span>${licenseEntries.map(([k,v])=>chip("license",k,v)).join("")}</div>
     <div class="facet-group"><span class="facet-label">Price</span>${chip("price","free",facets.price?.free||0)}${chip("price","paid",facets.price?.paid||0)}</div>
-    <div class="facet-group"><span class="facet-label">Time</span>${chip("timeRange","30d",facets.timeRange?.["30d"]||0)}</div>
+    <div class="facet-group"><span class="facet-label">Time</span>${chip("timeRange","7d",facets.timeRange?.["7d"]||0)}${chip("timeRange","30d",facets.timeRange?.["30d"]||0)}${chip("timeRange","365d",facets.timeRange?.["365d"]||0)}</div>
   `;
 
   elements.facets.querySelectorAll("[data-facet-kind]").forEach((button) => {
@@ -155,6 +185,8 @@ function renderFacets(facets) {
       const kind = button.dataset.facetKind;
       const value = button.dataset.facetValue;
       state.filters[kind] = state.filters[kind] === value ? "" : value;
+      if (kind === "timeRange" && elements.timeframe) elements.timeframe.value = state.filters.timeRange;
+      syncUrl();
       runSearch(elements.query.value.trim(), { reset: true, pushUrl: false });
     });
   });
@@ -169,6 +201,7 @@ function updateTabs() {
       state.activeTab = tab;
       syncUrl();
       if (elements.query.value.trim()) runSearch(elements.query.value.trim(), { reset: true, pushUrl: false });
+      setMobileFiltersOpen(false);
     },
   });
 }
@@ -183,12 +216,31 @@ function updateSourceFilters() {
       else state.selected.delete(id);
       syncUrl();
       if (elements.query.value.trim()) runSearch(elements.query.value.trim(), { reset: true, pushUrl: false });
+      setMobileFiltersOpen(false);
     },
   });
 }
 
+function classifyEntityType(item) {
+  const value = [item?.entityType, item?.meta?.entityType, item?.meta?.resultType, item?.meta?.kind, item?.meta?.type]
+    .map((entry) => (entry || "").toString().trim().toLowerCase())
+    .find(Boolean);
+  if (["user", "users", "profile", "creator"].includes(value)) return "user";
+  if (["collection", "collections", "board", "list"].includes(value)) return "collection";
+  if (["post", "posts", "article", "topic", "thread"].includes(value)) return "post";
+  return "asset";
+}
+
 function filterByTab(items) {
-  const map = { models: ["model3d"], laser: ["laser2d"], cnc: ["cnc"], scans: ["scan3d"], cad: ["cad"] };
+  const map = {
+    models: ["model3d", "cnc", "scan3d", "cad"],
+    "laser-cut": ["laser2d"],
+  };
+
+  if (state.activeTab === "users") return items.filter((item) => classifyEntityType(item) === "user");
+  if (state.activeTab === "collections") return items.filter((item) => classifyEntityType(item) === "collection");
+  if (state.activeTab === "posts") return items.filter((item) => classifyEntityType(item) === "post");
+
   const allowed = map[state.activeTab] || map.models;
   return items.filter((item) => allowed.includes(item.assetType || "model3d"));
 }
@@ -230,7 +282,7 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
       signal: state.requestController.signal,
     });
 
-    state.tabCounts = data.tabCounts || { models: data.count || 0, laser: 0, cnc: 0, scans: 0, cad: 0 };
+    state.tabCounts = data.tabCounts || { models: data.count || 0, "laser-cut": 0, users: 0, collections: 0, posts: 0 };
     state.chips = data.queryChips || [];
     updateTabs();
     renderQueryChips(elements.queryChips, state.chips, { onRemove: removeQueryChip });
@@ -245,7 +297,7 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
 
     const elapsed = Math.round(performance.now() - started);
     const sortCopy = elements.sort.options[elements.sort.selectedIndex]?.text || elements.sort.value;
-    elements.title.textContent = `${state.activeTab[0].toUpperCase()}${state.activeTab.slice(1)} (${state.tabCounts[state.activeTab] || 0})`;
+    elements.title.textContent = `${TAB_LABELS[state.activeTab] || "Models"} (${state.tabCounts[state.activeTab] || 0})`;
     elements.status.textContent = `${results.length} cards • sorted by ${sortCopy} • ${elapsed}ms`;
     document.title = `3D Meta Search — ${query}`;
   } catch (error) {
@@ -293,6 +345,7 @@ async function initSources() {
 
   const initialState = readUrlState();
   state.activeTab = initialState.tab || "models";
+  state.filters.timeRange = initialState.timeRange || "";
   if (initialState.sources) state.selected = new Set(initialState.sources.split(",").map((id) => id.trim()).filter(Boolean));
   state.filters = {
     license: initialState.license || "",
@@ -300,6 +353,7 @@ async function initSources() {
     price: initialState.price || "",
     timeRange: initialState.timeRange || "",
   };
+  if (elements.timeframe) elements.timeframe.value = state.filters.timeRange || "";
 
   if (initialState.mask !== null) {
     const mask = Number.parseInt(initialState.mask, 10);
@@ -346,6 +400,29 @@ function bindEvents() {
     syncUrl();
     if (elements.query.value.trim()) runSearch(elements.query.value.trim(), { reset: true, pushUrl: false });
   });
+
+  if (elements.timeframe) {
+    elements.timeframe.addEventListener("change", () => {
+      state.filters.timeRange = elements.timeframe.value;
+      syncUrl();
+      if (elements.query.value.trim()) runSearch(elements.query.value.trim(), { reset: true, pushUrl: false });
+    });
+  }
+
+  if (elements.mobileFilters) {
+    elements.mobileFilters.addEventListener("click", () => {
+      const open = !elements.layout.classList.contains("is-mobile-filters-open");
+      setMobileFiltersOpen(open);
+    });
+  }
+
+  if (elements.sidebarToggle) {
+    elements.sidebarToggle.addEventListener("click", () => {
+      const hidden = !elements.layout.classList.contains("is-sidebar-hidden");
+      setSidebarHidden(hidden);
+      setMobileFiltersOpen(false);
+    });
+  }
 
   elements.query.addEventListener("focus", () => loadSuggestions());
   elements.query.addEventListener("input", () => {
@@ -471,6 +548,9 @@ function bindEvents() {
   elements.sort.value = initial.sort || "relevant";
   elements.query.value = (initial.keyword || "hello").trim();
   updateQueryClear();
+  if (elements.timeframe) elements.timeframe.value = initial.timeRange || "";
+  setSidebarHidden(false);
+  setMobileFiltersOpen(false);
   syncUrl();
 
   const savedY = Number(sessionStorage.getItem(`scroll:${window.location.pathname}${window.location.search}`));

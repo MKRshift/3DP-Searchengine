@@ -43,6 +43,24 @@
 
   <div class="container tabs-row" id="search-tabs"></div>
 
+  <div class="container control-row">
+    <div class="control-row__left">
+      <label class="timeframe" for="timeframe-select">
+        <span>Timeframe</span>
+        <select id="timeframe-select" class="select">
+          <option value="">Any time</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="365d">Last year</option>
+        </select>
+      </label>
+    </div>
+    <div class="control-row__right">
+      <button id="mobile-filters-toggle" class="button control-row__mobile" type="button" aria-expanded="false">Filters</button>
+      <button id="sidebar-toggle" class="button" type="button" aria-expanded="true">Hide filters</button>
+    </div>
+  </div>
+
   <div class="layout container">
     <aside class="panel filters">
       <h2>Platforms</h2>

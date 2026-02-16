@@ -48,11 +48,11 @@ export function getProviderMetrics() {
 }
 
 const TAB_TO_ASSET = {
-  models: ["model3d"],
-  laser: ["laser2d"],
-  cnc: ["cnc"],
-  scans: ["scan3d"],
-  cad: ["cad"],
+  models: ["model3d", "cnc", "scan3d", "cad"],
+  "laser-cut": ["laser2d"],
+  users: ["user"],
+  collections: ["collection"],
+  posts: ["post"],
 };
 
 function rememberSearch(query, results) {
@@ -121,6 +121,35 @@ function parseIntent(rawQuery) {
   };
 }
 
+
+function normalizeEntityType(item) {
+  const candidates = [
+    item?.entityType,
+    item?.meta?.entityType,
+    item?.meta?.resultType,
+    item?.meta?.kind,
+    item?.meta?.type,
+  ]
+    .map((value) => (value ?? "").toString().trim().toLowerCase())
+    .filter(Boolean);
+
+  const value = candidates[0] || "";
+  if (["user", "users", "profile", "creator"].includes(value)) return "user";
+  if (["collection", "collections", "board", "list"].includes(value)) return "collection";
+  if (["post", "posts", "article", "topic", "thread"].includes(value)) return "post";
+  return "asset";
+}
+
+function normalizeTimeWindow(timeRange) {
+  const value = (timeRange ?? "").toString().trim().toLowerCase();
+  if (!value) return null;
+  const match = value.match(/^(\d+)d$/);
+  if (!match) return null;
+  const days = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(days) || days <= 0) return null;
+  return days * 86_400_000;
+}
+
 function providerState(provider, errorMap) {
   if ((provider.mode ?? provider.kind ?? "api") === "link") return "link";
   if (errorMap.has(provider.id)) return "error";
@@ -129,6 +158,9 @@ function providerState(provider, errorMap) {
 }
 
 function matchesTab(item, tab) {
+  if (tab === "users") return normalizeEntityType(item) === "user";
+  if (tab === "collections") return normalizeEntityType(item) === "collection";
+  if (tab === "posts") return normalizeEntityType(item) === "post";
   const allowed = TAB_TO_ASSET[tab] || TAB_TO_ASSET.models;
   return allowed.includes(item.assetType || "model3d");
 }
@@ -150,7 +182,7 @@ function applyFacetFilters(items, query) {
   const license = (query.license ?? "").toString().trim().toLowerCase();
   const format = (query.format ?? "").toString().trim().toLowerCase();
   const price = (query.price ?? "").toString().trim().toLowerCase();
-  const timeRange = (query.timeRange ?? "").toString().trim().toLowerCase();
+  const timeWindowMs = normalizeTimeWindow(query.timeRange);
 
   return items.filter((item) => {
     if (license && !(item.license || "").toLowerCase().includes(license)) return false;
@@ -163,10 +195,10 @@ function applyFacetFilters(items, query) {
       const p = Number(item.price);
       if (!(Number.isFinite(p) && p > 0)) return false;
     }
-    if (timeRange === "30d") {
+    if (timeWindowMs !== null) {
       const stamp = Date.parse(item.publishedAt || item.updatedAt || "");
       if (!Number.isFinite(stamp)) return false;
-      if (Date.now() - stamp > 30 * 86_400_000) return false;
+      if (Date.now() - stamp > timeWindowMs) return false;
     }
     return true;
   });
@@ -178,7 +210,7 @@ function buildFacets(items) {
     licenses: {},
     formats: {},
     price: { free: 0, paid: 0, unknown: 0 },
-    timeRange: { "30d": 0, older: 0, unknown: 0 },
+    timeRange: { "7d": 0, "30d": 0, "365d": 0, older: 0, unknown: 0 },
   };
 
   for (const item of items) {
@@ -199,8 +231,17 @@ function buildFacets(items) {
 
     const t = Date.parse(item.publishedAt || item.updatedAt || "");
     if (!Number.isFinite(t)) facets.timeRange.unknown += 1;
-    else if (Date.now() - t <= 30 * 86_400_000) facets.timeRange["30d"] += 1;
-    else facets.timeRange.older += 1;
+    else if (Date.now() - t <= 7 * 86_400_000) {
+      facets.timeRange["7d"] += 1;
+      facets.timeRange["30d"] += 1;
+      facets.timeRange["365d"] += 1;
+    } else if (Date.now() - t <= 30 * 86_400_000) {
+      facets.timeRange["30d"] += 1;
+      facets.timeRange["365d"] += 1;
+    } else if (Date.now() - t <= 365 * 86_400_000) {
+      facets.timeRange["365d"] += 1;
+      facets.timeRange.older += 1;
+    } else facets.timeRange.older += 1;
   }
 
   return facets;
@@ -209,10 +250,10 @@ function buildFacets(items) {
 function countByTabs(items) {
   return {
     models: items.filter((item) => matchesTab(item, "models")).length,
-    laser: items.filter((item) => matchesTab(item, "laser")).length,
-    cnc: items.filter((item) => matchesTab(item, "cnc")).length,
-    scans: items.filter((item) => matchesTab(item, "scans")).length,
-    cad: items.filter((item) => matchesTab(item, "cad")).length,
+    "laser-cut": items.filter((item) => matchesTab(item, "laser-cut")).length,
+    users: items.filter((item) => matchesTab(item, "users")).length,
+    collections: items.filter((item) => matchesTab(item, "collections")).length,
+    posts: items.filter((item) => matchesTab(item, "posts")).length,
   };
 }
 
@@ -248,6 +289,7 @@ export async function executeSearch({ query, providers }) {
   const page = safeNumber(query.page, 1, 1, 20);
   const sort = (query.sort ?? "relevant").toString().trim().toLowerCase();
   const tab = (advanced.parsed.type || query.tab || "models").toString().trim().toLowerCase();
+  const normalizedTab = tab === "laser" ? "laser-cut" : tab;
   const sourcesParam = (query.sources ?? "").toString().trim();
   const requested = sourcesParam ? parseCsv(sourcesParam) : Object.keys(providers);
   const requestedWithQuery = [...requested, ...advanced.parsed.source];
@@ -277,7 +319,7 @@ export async function executeSearch({ query, providers }) {
     price: advanced.parsed.price || query.price || "",
   };
 
-  const cacheKey = JSON.stringify({ q, limit, page, sort, tab, intent, chips: advanced.chips, sources: enabledApiProviders.map((provider) => provider.id), filters: effectiveFilters });
+  const cacheKey = JSON.stringify({ q, limit, page, sort, tab: normalizedTab, intent, chips: advanced.chips, sources: enabledApiProviders.map((provider) => provider.id), filters: effectiveFilters });
   const cached = cache.get(cacheKey);
   if (cached) {
     return { status: 200, payload: { ...cached, quickLinks, cached: true, tookMs: Date.now() - t0 } };
@@ -292,7 +334,7 @@ export async function executeSearch({ query, providers }) {
       limiter(async () => {
         try {
           const p0 = Date.now();
-          const providerPayload = await provider.search({ q: intent.expandedQuery, limit, page, sort, tab });
+          const providerPayload = await provider.search({ q: intent.expandedQuery, limit, page, sort, tab: normalizedTab });
           const providerResults = normalizeAdapterPayload(providerPayload);
           for (const item of providerResults) {
             try {
@@ -319,8 +361,8 @@ export async function executeSearch({ query, providers }) {
   const rankedAll = rankAndDedupe(results, sort);
   const facetedAll = applyFacetFilters(rankedAll, effectiveFilters);
 
-  const finalResults = facetedAll.filter((item) => matchesTab(item, tab)).slice(0, limit);
-  const linkResults = buildLinkResults({ quickLinks, query: q }).filter((item) => matchesTab(item, tab));
+  const finalResults = facetedAll.filter((item) => matchesTab(item, normalizedTab)).slice(0, limit);
+  const linkResults = buildLinkResults({ quickLinks, query: q }).filter((item) => matchesTab(item, normalizedTab));
 
   const errorMap = new Map(errors.map((error) => [error.source, error]));
   const providerStatus = selectedProviders.map((provider) => ({
@@ -343,7 +385,7 @@ export async function executeSearch({ query, providers }) {
     page,
     limit,
     sort,
-    tab,
+    tab: normalizedTab,
     sources: enabledApiProviders.map((provider) => provider.id),
     links: enabledLinkProviders.map((provider) => provider.id),
     count: finalResults.length,
