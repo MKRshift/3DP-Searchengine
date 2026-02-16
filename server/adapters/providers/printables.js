@@ -1,5 +1,5 @@
 import { fetchText } from "../../lib/http.js";
-import { pickImageFromSnippet, safeDecode } from "../../lib/htmlExtract.js";
+import { pickImageFromSnippet, safeDecode, titleFromPath } from "../../lib/htmlExtract.js";
 
 function buildSearchUrl(q) {
   const mode = (process.env.PRINTABLES_MODE || "all").toLowerCase();
@@ -22,10 +22,6 @@ function dedupe(items) {
   return out;
 }
 
-function slugToTitle(slug) {
-  return safeDecode(String(slug || "").replace(/-/g, " ").trim()) || "Untitled";
-}
-
 function parseResults(html, limit, q) {
   const items = [];
   const modelRe = /href="(\/model\/\d+-[^"?#\s]+)"/g;
@@ -39,10 +35,7 @@ function parseResults(html, limit, q) {
     const titleAttrRe = new RegExp(`href="${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*\\btitle="([^"]+)"`);
     const tAttr = around.match(titleAttrRe);
     if (tAttr && tAttr[1]) title = tAttr[1].trim();
-    if (!title) {
-      const slug = path.split("/").pop() || "";
-      title = slugToTitle(slug.replace(/^\d+-/, ""));
-    }
+    if (!title) title = titleFromPath(path, "Printables result");
 
     let author = "";
     const authorRe = /href="\/@([^"\/\s]+)"/;
@@ -67,7 +60,7 @@ function parseResults(html, limit, q) {
       id: `printables:link:${q}`,
       title: `Search “${q}” on Printables`,
       url: buildSearchUrl(q),
-      thumbnail: null,
+      thumbnail: "https://www.google.com/s2/favicons?domain=printables.com&sz=64",
       author: "Direct platform search",
       meta: { tags: ["external-search"] },
       score: 0.1,
@@ -75,6 +68,29 @@ function parseResults(html, limit, q) {
   }
 
   return dedupe(items);
+}
+
+function parseMirrorMarkdown(md, limit) {
+  const items = [];
+  const seen = new Set();
+  const re = /https:\/\/www\.printables\.com\/(model\/\d+-[^\s)\]]+)/gi;
+  let match;
+  while ((match = re.exec(md)) && items.length < limit) {
+    const path = `/${match[1]}`;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    items.push({
+      source: "printables",
+      id: path,
+      title: titleFromPath(path, "Printables result"),
+      url: `https://www.printables.com${path}`,
+      thumbnail: "https://www.google.com/s2/favicons?domain=printables.com&sz=64",
+      author: "",
+      meta: {},
+      score: 1,
+    });
+  }
+  return items;
 }
 
 export function printablesLinkProvider() {
@@ -87,7 +103,7 @@ export function printablesLinkProvider() {
     iconUrl: "https://www.google.com/s2/favicons?domain=printables.com&sz=64",
     searchUrlTemplate: "https://www.printables.com/search/models?q={q}",
     isPublic: true,
-    notes: "HTML search parser with cautious rate limiting; falls back to link",
+    notes: "HTML search parser with mirror fallback; falls back to link",
     isConfigured() {
       return true;
     },
@@ -98,7 +114,13 @@ export function printablesLinkProvider() {
         const html = await fetchText(url, { timeoutMs: 12_000 });
         return parseResults(html, perPage, q).slice(0, perPage);
       } catch {
-        return parseResults("", perPage, q).slice(0, perPage);
+        try {
+          const mirror = await fetchText(`https://r.jina.ai/${url}`, { timeoutMs: 20_000, retries: 0 });
+          const parsed = parseMirrorMarkdown(mirror, perPage);
+          return parsed.length ? parsed : parseResults("", perPage, q).slice(0, perPage);
+        } catch {
+          return parseResults("", perPage, q).slice(0, perPage);
+        }
       }
     },
   };

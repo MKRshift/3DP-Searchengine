@@ -1,15 +1,23 @@
 import { fetchText } from "../../lib/http.js";
 import { pickImageFromSnippet, titleFromPath } from "../../lib/htmlExtract.js";
 
-function buildFallbackLink(q) {
+function slugifyQuery(q) {
+  return String(q || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100) || "3d-models";
+}
+
+function buildFallbackLink(q, { captcha = false } = {}) {
   return {
     source: "cgtrader",
     id: `cgtrader:link:${q}`,
-    title: `Search “${q}” on CGTrader`,
-    url: `https://www.cgtrader.com/3d-models?keywords=${encodeURIComponent(q)}`,
-    thumbnail: null,
-    author: "Direct platform search",
-    meta: { tags: ["external-search"] },
+    title: captcha ? `CGTrader verification required — open search for “${q}”` : `Search “${q}” on CGTrader`,
+    url: `https://www.cgtrader.com/3d-models/${slugifyQuery(q)}`,
+    thumbnail: "https://www.google.com/s2/favicons?domain=cgtrader.com&sz=64",
+    author: captcha ? "CAPTCHA / anti-bot challenge" : "Direct platform search",
+    meta: { tags: ["external-search", ...(captcha ? ["captcha"] : [])] },
     score: 0.1,
   };
 }
@@ -17,11 +25,11 @@ function buildFallbackLink(q) {
 function parseItems(html, limit) {
   const items = [];
   const seen = new Set();
-  const re = /href="(\/3d-models\/[^"?#]+)"[^>]*>/gi;
+  const re = /href="(\/3d-models\/[^"]+)"[^>]*>/gi;
   let match;
 
   while ((match = re.exec(html)) && items.length < limit) {
-    const path = match[1];
+    const path = match[1].split("?")[0];
     if (seen.has(path)) continue;
     seen.add(path);
 
@@ -44,6 +52,29 @@ function parseItems(html, limit) {
   return items;
 }
 
+function parseMirrorMarkdown(md, limit) {
+  const items = [];
+  const seen = new Set();
+  const re = /https:\/\/www\.cgtrader\.com\/(3d-models\/[a-z0-9][^\s)\]]+)/gi;
+  let match;
+  while ((match = re.exec(md)) && items.length < limit) {
+    const path = `/${match[1].split("?")[0]}`;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    items.push({
+      source: "cgtrader",
+      id: path,
+      title: titleFromPath(path, "CGTrader result"),
+      url: `https://www.cgtrader.com${path}`,
+      thumbnail: "https://www.google.com/s2/favicons?domain=cgtrader.com&sz=64",
+      author: "",
+      meta: {},
+      score: 1,
+    });
+  }
+  return items;
+}
+
 export function cgtraderProvider() {
   return {
     id: "cgtrader",
@@ -51,23 +82,33 @@ export function cgtraderProvider() {
     kind: "api",
     homepage: "https://www.cgtrader.com",
     iconUrl: "https://www.google.com/s2/favicons?domain=cgtrader.com&sz=64",
-    searchUrlTemplate: "https://www.cgtrader.com/3d-models?keywords={q}",
+    searchUrlTemplate: "https://www.cgtrader.com/3d-models/{q}",
     isPublic: true,
-    notes: "Public search parser (tokenless)",
+    notes: "Public search parser with mirror fallback (tokenless)",
     isConfigured() {
       return true;
     },
-    async search({ q, limit, page }) {
+    async search({ q, limit }) {
+      const slug = slugifyQuery(q);
+      const directUrl = `https://www.cgtrader.com/3d-models/${slug}`;
       try {
-        const url = new URL("https://www.cgtrader.com/3d-models");
-        url.searchParams.set("keywords", q);
-        url.searchParams.set("page", String(page));
-        const html = await fetchText(url.toString(), { timeoutMs: 15_000 });
+        const html = await fetchText(directUrl, { timeoutMs: 15_000 });
         const items = parseItems(html, limit);
-        return items.length ? items : [buildFallbackLink(q)];
+        if (items.length) return items;
       } catch {
-        return [buildFallbackLink(q)];
+        // fallback below
       }
+
+      try {
+        const mirror = await fetchText(`https://r.jina.ai/${directUrl}`, { timeoutMs: 20_000, retries: 0 });
+        const items = parseMirrorMarkdown(mirror, limit);
+        if (items.length) return items;
+        if (/requiring CAPTCHA|security verification|Just a moment/i.test(mirror)) return [buildFallbackLink(q, { captcha: true })];
+      } catch {
+        // fallback
+      }
+
+      return [buildFallbackLink(q)];
     },
   };
 }

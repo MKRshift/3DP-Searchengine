@@ -42,7 +42,7 @@ function buildFallbackLink(q) {
     id: `makerworld:link:${q}`,
     title: `Search “${q}” on MakerWorld`,
     url: `https://makerworld.com/en/search/models?keyword=${encodeURIComponent(q)}`,
-    thumbnail: null,
+    thumbnail: "https://www.google.com/s2/favicons?domain=makerworld.com&sz=64",
     author: "Direct platform search",
     meta: { tags: ["external-search"] },
     score: 0.1,
@@ -181,14 +181,33 @@ export function makerworldLinkProvider() {
         `https://makerworld.com/en/search?keyword=${encodeURIComponent(q)}&page=${page}`,
       ];
 
+      let captchaDetected = false;
       for (const htmlUrl of htmlCandidates) {
         try {
           const html = await fetchText(htmlUrl, { timeoutMs: 12_000, headers });
           const parsed = parseHtmlFallback(html, limit);
           if (parsed.length) return parsed;
+          if (/security verification|captcha|just a moment|cloudflare/i.test(html)) captchaDetected = true;
         } catch {
           // try next candidate
         }
+
+        try {
+          const mirror = await fetchText(`https://r.jina.ai/${htmlUrl}`, { timeoutMs: 20_000, retries: 0 });
+          const parsed = parseHtmlFallback(mirror, limit);
+          if (parsed.length) return parsed;
+          if (/requiring CAPTCHA|security verification|just a moment|forbidden/i.test(mirror)) captchaDetected = true;
+        } catch {
+          // try next candidate
+        }
+      }
+
+      if (captchaDetected) {
+        const blocked = buildFallbackLink(q);
+        blocked.title = `MakerWorld verification required — open search for “${q}”`;
+        blocked.author = "CAPTCHA / anti-bot challenge";
+        blocked.meta = { ...(blocked.meta || {}), tags: [...(blocked.meta?.tags || []), "captcha"] };
+        return [blocked];
       }
 
       return [buildFallbackLink(q)];
