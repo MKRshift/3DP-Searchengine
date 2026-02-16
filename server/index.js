@@ -87,7 +87,7 @@ const server = http.createServer(async (req, res) => {
   if (await handleApiRoute({ req, res, url, providers, rateLimitSearch, executeSearch, getProviderMetrics, getItemDetails, getSuggestions })) return;
   if (handleProviderAdminRoute({ url, res, providers, getProviderMetrics })) return;
 
-  if (url.pathname === "/" || /^\/search(\/(models|laser|cnc|scans|cad))?$/.test(url.pathname)) {
+  if (url.pathname === "/" || /^\/search(\/(models|laser-cut|users|collections|posts|laser))?$/.test(url.pathname)) {
     sendFile(res, path.join(staticDir, "index.html"));
     return;
   }

@@ -17,9 +17,17 @@ export const MASK_ORDER = [
   "xtool",
 ];
 
+const VALID_TABS = new Set(["models", "laser-cut", "users", "collections", "posts"]);
+
+function normalizeTab(value) {
+  const tab = (value ?? "").toString().trim().toLowerCase();
+  if (tab === "laser") return "laser-cut";
+  return VALID_TABS.has(tab) ? tab : "models";
+}
+
 function tabFromPath(pathname) {
-  const m = pathname.match(/^\/search\/(models|laser|cnc|scans|cad)$/);
-  return m?.[1] || null;
+  const m = pathname.match(/^\/search\/(models|laser-cut|users|collections|posts|laser)$/);
+  return normalizeTab(m?.[1]);
 }
 
 export function readUrlState() {
@@ -27,7 +35,7 @@ export function readUrlState() {
   return {
     keyword: url.searchParams.get("keyword") || url.searchParams.get("q") || "",
     sort: (url.searchParams.get("sort") || "relevant").toLowerCase(),
-    tab: (url.searchParams.get("tab") || tabFromPath(url.pathname) || "models").toLowerCase(),
+    tab: normalizeTab(url.searchParams.get("tab") || tabFromPath(url.pathname) || "models"),
     mask: url.searchParams.get("w"),
     sources: url.searchParams.get("sources"),
     license: url.searchParams.get("license") || "",
@@ -55,10 +63,11 @@ export function applyMaskToSet(mask, ids, fallback) {
 
 export function setUrlState({ keyword, sort, tab = "models", selected, ids, filters = {} }) {
   const url = new URL(window.location.href);
-  url.pathname = `/search/${tab}`;
+  const normalizedTab = normalizeTab(tab);
+  url.pathname = `/search/${normalizedTab}`;
   url.searchParams.set("keyword", keyword);
   url.searchParams.set("sort", sort);
-  url.searchParams.set("tab", tab);
+  url.searchParams.set("tab", normalizedTab);
   url.searchParams.set("w", String(selectedToMask(selected, ids)));
   ["license", "format", "price", "timeRange"].forEach((key) => {
     const value = (filters[key] ?? "").toString().trim();
