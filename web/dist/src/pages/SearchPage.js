@@ -41,7 +41,6 @@ const state = {
   autoFillPasses: 0,
   lastPageCount: 0,
   searchSeq: 0,
-  searchController: null,
 };
 
 const emptySuggestionGroups = () => ({ popular: [], recent: [], items: [] });
@@ -161,21 +160,14 @@ function triggerSearchFromInput(raw) {
 }
 
 async function runSearch(query, { reset = true, pushUrl = true } = {}) {
-  const normalizedQuery = (query || "").trim();
-  if (!normalizedQuery) return;
+  if (!query) return;
   const seq = ++state.searchSeq;
-  const pageForRequest = state.page;
-  if (state.searchController && !state.searchController.signal.aborted) state.searchController.abort();
-  const controller = new AbortController();
-  state.searchController = controller;
-
   setSearchViewMode("search");
   if (pushUrl) syncUrl();
   if (reset) {
     state.page = 1;
     state.hasMore = true;
     state.loadingMore = false;
-    state.autoFillPasses = 0;
     renderSkeleton(elements.grid);
   }
 
@@ -184,15 +176,7 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
   elements.status.textContent = reset ? "Searching…" : "Loading more…";
 
   try {
-    const data = await fetchSearch({
-      query: normalizedQuery,
-      sort: elements.sort.value,
-      tab: state.activeTab,
-      selected: state.selected,
-      page: state.page,
-      filters: state.filters,
-      signal: controller.signal,
-    });
+    const data = await fetchSearch({ query, sort: elements.sort.value, tab: state.activeTab, selected: state.selected, page: state.page, filters: state.filters });
     if (seq !== state.searchSeq) return;
     state.tabCounts = data.tabCounts || state.tabCounts;
     state.chips = data.queryChips || [];
@@ -215,37 +199,32 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
     elements.status.textContent = `${Array.isArray(data.results) ? data.results.length : 0}${state.hasMore ? "+" : ""} cards`;
     const prev = elements.grid.querySelector("#grid-load-more");
     if (prev) prev.remove();
-    if (state.hasMore) {
-      const btn = document.createElement("button");
-      btn.id = "grid-load-more";
-      btn.type = "button";
-      btn.className = "button";
-      btn.textContent = "Load more";
-      btn.style.gridColumn = "1 / -1";
-      btn.addEventListener("click", () => {
-        if (state.loadingMore) return;
-        state.loadingMore = true;
-        state.page += 1;
-        runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
-      });
-      elements.grid.appendChild(btn);
-    }
-
+    const btn = document.createElement("button");
+    btn.id = "grid-load-more";
+    btn.type = "button";
+    btn.className = "button";
+    btn.textContent = "Load more";
+    btn.style.gridColumn = "1 / -1";
+    btn.addEventListener("click", () => {
+      if (state.loadingMore) return;
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    });
+    elements.grid.appendChild(btn);
+    if (!reset) state.autoFillPasses = 0;
     if (state.hasMore && state.autoFillPasses < 4 && document.body.scrollHeight <= window.innerHeight + 200) {
       state.autoFillPasses += 1;
       state.loadingMore = true;
       state.page += 1;
-      await runSearch(normalizedQuery, { reset: false, pushUrl: false });
+      await runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
     }
   } catch (error) {
     if (seq !== state.searchSeq) return;
-    if (error?.name === "AbortError") return;
-    if (!reset && state.page === pageForRequest) state.page = Math.max(1, pageForRequest - 1);
     elements.status.textContent = `⚠️ ${error.message}`;
-    if (reset) renderResultGrid(elements.grid, []);
+    renderResultGrid(elements.grid, []);
   } finally {
     if (seq !== state.searchSeq) return;
-    if (state.searchController === controller) state.searchController = null;
     state.loadingMore = false;
     setButtonLoading(elements.submit, false);
   }
@@ -388,7 +367,7 @@ function bindEvents() {
   // Infinite scroll across desktop (grid scroll container) and mobile (window scroll)
   function maybeLoadMoreForWindow() {
     if (state.loadingMore) return;
-    if (!state.hasMore) return;
+    if (!state.hasMore && state.lastPageCount === 0) return;
     const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 200;
     if (nearBottom) {
       state.loadingMore = true;
@@ -398,7 +377,7 @@ function bindEvents() {
   }
   function maybeLoadMoreForGrid() {
     if (state.loadingMore) return;
-    if (!state.hasMore) return;
+    if (!state.hasMore && state.lastPageCount === 0) return;
     const el = elements.grid;
     const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 120;
     if (nearBottom) {

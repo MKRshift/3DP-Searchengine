@@ -41,7 +41,6 @@ const state = {
   autoFillPasses: 0,
   lastPageCount: 0,
   searchSeq: 0,
-  searchController: null,
 };
 
 const emptySuggestionGroups = () => ({ popular: [], recent: [], items: [] });
@@ -161,21 +160,14 @@ function triggerSearchFromInput(raw) {
 }
 
 async function runSearch(query, { reset = true, pushUrl = true } = {}) {
-  const normalizedQuery = (query || "").trim();
-  if (!normalizedQuery) return;
+  if (!query) return;
   const seq = ++state.searchSeq;
-  const pageForRequest = state.page;
-  if (state.searchController && !state.searchController.signal.aborted) state.searchController.abort();
-  const controller = new AbortController();
-  state.searchController = controller;
-
   setSearchViewMode("search");
   if (pushUrl) syncUrl();
   if (reset) {
     state.page = 1;
     state.hasMore = true;
     state.loadingMore = false;
-    state.autoFillPasses = 0;
     renderSkeleton(elements.grid);
   }
 
@@ -184,15 +176,7 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
   elements.status.textContent = reset ? "Searching…" : "Loading more…";
 
   try {
-    const data = await fetchSearch({
-      query: normalizedQuery,
-      sort: elements.sort.value,
-      tab: state.activeTab,
-      selected: state.selected,
-      page: state.page,
-      filters: state.filters,
-      signal: controller.signal,
-    });
+    const data = await fetchSearch({ query, sort: elements.sort.value, tab: state.activeTab, selected: state.selected, page: state.page, filters: state.filters });
     if (seq !== state.searchSeq) return;
     state.tabCounts = data.tabCounts || state.tabCounts;
     state.chips = data.queryChips || [];
@@ -239,13 +223,10 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
     }
   } catch (error) {
     if (seq !== state.searchSeq) return;
-    if (error?.name === "AbortError") return;
-    if (!reset && state.page === pageForRequest) state.page = Math.max(1, pageForRequest - 1);
     elements.status.textContent = `⚠️ ${error.message}`;
-    if (reset) renderResultGrid(elements.grid, []);
+    renderResultGrid(elements.grid, []);
   } finally {
     if (seq !== state.searchSeq) return;
-    if (state.searchController === controller) state.searchController = null;
     state.loadingMore = false;
     setButtonLoading(elements.submit, false);
   }
