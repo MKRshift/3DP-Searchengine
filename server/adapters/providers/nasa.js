@@ -46,7 +46,7 @@ export function nasaProvider() {
     isConfigured() {
       return true;
     },
-    async search({ q, limit }) {
+    async search({ q, limit, page = 1 }) {
       const tree = await getTree();
       const query = (q ?? "").toLowerCase();
       const matches = tree.filter((item) => {
@@ -55,7 +55,9 @@ export function nasaProvider() {
         return p.includes(query) && /\.(stl|obj|glb|gltf|fbx|3mf|step|stp|iges|igs|svg|dxf)$/i.test(p);
       });
 
-      return matches.slice(0, limit).map((item) => {
+      const start = Math.max(0, (Number(page) - 1) * Math.min(limit, 100));
+      const end = start + Math.min(limit, 100);
+      return matches.slice(start, end).map((item) => {
         const path = item.path;
         const name = path.split("/").pop() || path;
         return {

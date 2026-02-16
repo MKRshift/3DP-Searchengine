@@ -36,6 +36,8 @@ const state = {
   page: 1, loadingMore: false, hasMore: true, activeTab: "models",
   tabCounts: { models: 0, "laser-cut": 0, users: 0, collections: 0, posts: 0 }, filters: { license: "", format: "", price: "", timeRange: "" }, chips: [],
   openGroups: new Set(), lastFocus: null,
+  autoFillPasses: 0,
+  lastPageCount: 0,
 };
 
 const emptySuggestionGroups = () => ({ popular: [], recent: [], items: [] });
@@ -165,14 +167,39 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
 
     const results = [...(data.results || []), ...(data.linkResults || [])];
     renderResultGrid(elements.grid, results, { append: !reset });
-    state.hasMore = results.length >= 24;
+    state.lastPageCount = Array.isArray(data.results) ? data.results.length : 0;
+    const serverHasMore = data.hasMore;
+    const defaultHasMore = state.lastPageCount > 0;
+    state.hasMore = serverHasMore === undefined ? defaultHasMore : Boolean(serverHasMore);
 
     renderQuickLinks(elements.quickLinks, data.quickLinks || []);
     renderErrors(elements.errors, data.errors || []);
     renderProviderStatus(elements.providerStatus, data.providerStatus || []);
 
     elements.title.textContent = `${TAB_LABELS[state.activeTab] || "Results"} (${state.tabCounts[state.activeTab] || 0})`;
-    elements.status.textContent = `${results.length} cards`;
+    elements.status.textContent = `${Array.isArray(data.results) ? data.results.length : 0}${state.hasMore ? "+" : ""} cards`;
+    const prev = elements.grid.querySelector("#grid-load-more");
+    if (prev) prev.remove();
+    const btn = document.createElement("button");
+    btn.id = "grid-load-more";
+    btn.type = "button";
+    btn.className = "button";
+    btn.textContent = "Load more";
+    btn.style.gridColumn = "1 / -1";
+    btn.addEventListener("click", () => {
+      if (state.loadingMore) return;
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    });
+    elements.grid.appendChild(btn);
+    if (!reset) state.autoFillPasses = 0;
+    if (state.hasMore && state.autoFillPasses < 4 && document.body.scrollHeight <= window.innerHeight + 200) {
+      state.autoFillPasses += 1;
+      state.loadingMore = true;
+      state.page += 1;
+      await runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    }
   } catch (error) {
     if (error.name !== "AbortError") {
       elements.status.textContent = `⚠️ ${error.message}`;
@@ -310,6 +337,50 @@ function bindEvents() {
     elements.topbar.classList.toggle("is-scrolled", window.scrollY > 4);
   });
   elements.topButton.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+
+  // Infinite scroll across desktop (grid scroll container) and mobile (window scroll)
+  function maybeLoadMoreForWindow() {
+    if (state.loadingMore) return;
+    if (!state.hasMore && state.lastPageCount === 0) return;
+    const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 200;
+    if (nearBottom) {
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    }
+  }
+  function maybeLoadMoreForGrid() {
+    if (state.loadingMore) return;
+    if (!state.hasMore && state.lastPageCount === 0) return;
+    const el = elements.grid;
+    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 120;
+    if (nearBottom) {
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    }
+  }
+  elements.grid.addEventListener("scroll", maybeLoadMoreForGrid);
+  window.addEventListener("scroll", maybeLoadMoreForWindow);
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (!entry.isIntersecting) return;
+      if (state.loadingMore || !state.hasMore) return;
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    }, { root: null, rootMargin: "120px", threshold: 0 });
+    io.observe(elements.sentinel);
+    // Also observe the grid "load more" button when present
+    const observeLoadMore = () => {
+      const btn = elements.grid.querySelector("#grid-load-more");
+      if (btn) io.observe(btn);
+    };
+    const mo = new MutationObserver(observeLoadMore);
+    mo.observe(elements.grid, { childList: true });
+    observeLoadMore();
+  }
 
   window.addEventListener("beforeunload", () => { unbindOutsideSuggest(); unbindOutsideDrawer(); });
 }

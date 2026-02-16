@@ -1,13 +1,118 @@
-import { makeLinkProvider } from "./_link_provider.js";
+import { fetchText } from "../../lib/http.js";
+
+function buildSearchUrl(q) {
+  const mode = (process.env.PRINTABLES_MODE || "all").toLowerCase();
+  const base = mode === "free" ? "https://www.printables.com/search/models" : "https://www.printables.com/search/all-models";
+  const url = new URL(base);
+  url.searchParams.set("q", q);
+  return url.toString();
+}
+
+function dedupe(items) {
+  const seen = new Set();
+  const out = [];
+  for (const it of items) {
+    const key = it.url;
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(it);
+    }
+  }
+  return out;
+}
+
+function tryDecode(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+
+function slugToTitle(slug) {
+  return tryDecode(String(slug || "").replace(/-/g, " ").trim()) || "Untitled";
+}
+
+function parseResults(html, limit, q) {
+  const items = [];
+  const modelRe = /href="(\/model\/\d+-[^"?#\s]+)"/g;
+  let match;
+  while ((match = modelRe.exec(html)) && items.length < limit) {
+    const path = match[1];
+    const idx = match.index;
+    const around = html.slice(Math.max(0, idx - 400), Math.min(html.length, idx + 600));
+
+    let title = null;
+    // try title attribute on the same anchor
+    const titleAttrRe = new RegExp(`href="${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*\\btitle="([^"]+)"`);
+    const tAttr = around.match(titleAttrRe);
+    if (tAttr && tAttr[1]) title = tAttr[1].trim();
+    if (!title) {
+      // fallback: derive from slug
+      const slug = path.split("/").pop() || "";
+      title = slugToTitle(slug.replace(/^\d+-/, ""));
+    }
+
+    let author = "";
+    const authorRe = /href="\/@([^"\/\s]+)"/;
+    const a = around.match(authorRe);
+    if (a && a[1]) author = tryDecode(a[1]);
+
+    let thumb = null;
+    const imgRe = /<img[^>]+srcset="([^"]+\.webp[^"]*)"/i;
+    const img = around.match(imgRe);
+    if (img && img[1]) {
+      const parts = img[1].split(",").map((s) => s.trim().split(" ")[0]).filter(Boolean);
+      thumb = parts[parts.length - 1] || null;
+    } else {
+      const imgRe2 = /<img[^>]+src="([^"]+\.webp)"/i;
+      const img2 = around.match(imgRe2);
+      if (img2 && img2[1]) thumb = img2[1];
+    }
+
+    items.push({
+      source: "printables",
+      id: String(path),
+      title,
+      url: `https://www.printables.com${path}`,
+      thumbnail: thumb,
+      author,
+      meta: {},
+      score: 1,
+    });
+  }
+
+  if (items.length === 0) {
+    return [{
+      source: "printables",
+      id: `printables:link:${q}`,
+      title: `Search “${q}” on Printables`,
+      url: buildSearchUrl(q),
+      thumbnail: null,
+      author: "Direct platform search",
+      meta: { tags: ["external-search"] },
+      score: 0.1,
+    }];
+  }
+
+  return dedupe(items);
+}
 
 export function printablesLinkProvider() {
-  return makeLinkProvider({
+  return {
     id: "printables",
     label: "Printables",
+    kind: "api",
+    mode: "api",
     homepage: "https://www.printables.com",
     iconUrl: "https://www.google.com/s2/favicons?domain=printables.com&sz=64",
-    // Printables supports advanced operators; we just pass the raw query.
     searchUrlTemplate: "https://www.printables.com/search/models?q={q}",
-    notes: "🔗 Link-only (no documented public API).",
-  });
+    isPublic: true,
+    notes: "HTML search parser with cautious rate limiting; falls back to link",
+    isConfigured() {
+      return true;
+    },
+    async search({ q, limit, page }) {
+      const perPage = Math.min(limit, 24);
+      const url = buildSearchUrl(q) + `&page=${page}`;
+      const html = await fetchText(url, { timeoutMs: 12_000 });
+      return parseResults(html, perPage, q).slice(0, perPage);
+    },
+  };
 }

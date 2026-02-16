@@ -1,4 +1,29 @@
-import pLimit from "p-limit";
+function pLimit(concurrency = 4) {
+  let active = 0;
+  const queue = [];
+  function next() {
+    if (!queue.length || active >= concurrency) return;
+    const { fn, resolve, reject } = queue.shift();
+    active += 1;
+    Promise.resolve()
+      .then(fn)
+      .then((value) => {
+        active -= 1;
+        next();
+        resolve(value);
+      })
+      .catch((err) => {
+        active -= 1;
+        next();
+        reject(err);
+      });
+  }
+  return (fn) =>
+    new Promise((resolve, reject) => {
+      queue.push({ fn, resolve, reject });
+      next();
+    });
+}
 
 import { cache } from "./cache.service.js";
 import { rankAndDedupe } from "../lib/rank.js";
@@ -334,6 +359,7 @@ export async function executeSearch({ query, providers }) {
   const limiter = pLimit(4);
   const results = [];
   const errors = [];
+  const providerPageCounts = [];
 
   await Promise.all(
     enabledApiProviders.map((provider) =>
@@ -342,6 +368,7 @@ export async function executeSearch({ query, providers }) {
           const p0 = Date.now();
           const providerPayload = await provider.search({ q: intent.expandedQuery, limit, page, sort, tab: normalizedTab });
           const providerResults = normalizeAdapterPayload(providerPayload);
+          providerPageCounts.push({ id: provider.id, count: Array.isArray(providerResults) ? providerResults.length : 0 });
           for (const item of providerResults) {
             try {
               results.push(applyBoost(enrichResult(item, providers), intent));
@@ -367,8 +394,43 @@ export async function executeSearch({ query, providers }) {
   const rankedAll = rankAndDedupe(results, sort);
   const facetedAll = applyFacetFilters(rankedAll, effectiveFilters);
 
-  const finalResults = facetedAll.filter((item) => matchesTab(item, normalizedTab)).slice(0, limit);
-  const linkResults = buildLinkResults({ quickLinks, query: q }).filter((item) => matchesTab(item, normalizedTab));
+  // promote source diversity by interleaving items from different sources in rank order
+  function diversifyBySource(items) {
+    const groups = new Map();
+    for (const item of items) {
+      const key = item.source || "unknown";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    const order = Array.from(groups.keys());
+    const diversified = [];
+    let added = true;
+    let idx = 0;
+    while (added && diversified.length < items.length) {
+      added = false;
+      for (const key of order) {
+        const bucket = groups.get(key);
+        if (bucket && idx < bucket.length) {
+          diversified.push(bucket[idx]);
+          added = true;
+        }
+      }
+      idx += 1;
+    }
+    return diversified;
+  }
+
+  const diversifiedAll = diversifyBySource(facetedAll);
+
+  const start = (page - 1) * limit;
+  const end = start + limit;
+  const allForTab = diversifiedAll.filter((item) => matchesTab(item, normalizedTab));
+  const totalForTab = allForTab.length;
+  const finalResults = allForTab.slice(start, end);
+  const linkResults =
+    page > 1
+      ? []
+      : buildLinkResults({ quickLinks, query: q }).filter((item) => matchesTab(item, normalizedTab));
 
   const errorMap = new Map(errors.map((error) => [error.source, error]));
   const providerStatus = selectedProviders.map((provider) => ({
@@ -395,6 +457,8 @@ export async function executeSearch({ query, providers }) {
     sources: enabledApiProviders.map((provider) => provider.id),
     links: enabledLinkProviders.map((provider) => provider.id),
     count: finalResults.length,
+    totalCount: totalForTab,
+    hasMore: finalResults.length === limit,
     results: finalResults,
     linkResults,
     quickLinks,
