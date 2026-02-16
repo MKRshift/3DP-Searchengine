@@ -16,6 +16,32 @@ function normalizeSuggestionGroups(payload) {
   };
 }
 
+const SEARCH_TIMEOUT_MS = 12_000;
+
+function withRequestTimeout(signal, timeoutMs) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup: () => {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
 export async function fetchSources() {
   const response = await fetch("/api/sources");
   const data = await response.json();
@@ -29,15 +55,25 @@ export async function fetchSearch({ query, sort, tab = "models", selected, page 
   url.searchParams.set("page", String(page));
   url.searchParams.set("sort", sort);
   url.searchParams.set("tab", tab);
-  if (selected.size) url.searchParams.set("sources", Array.from(selected).join(","));
+  if (selected?.size) url.searchParams.set("sources", Array.from(selected).join(","));
   for (const [k, v] of Object.entries(filters)) {
     if (v) url.searchParams.set(k, v);
   }
 
-  const response = await fetch(url.toString(), { signal });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.error || "Search failed");
-  return data;
+  const request = withRequestTimeout(signal, SEARCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url.toString(), { signal: request.signal });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || `Search failed (${response.status})`);
+    return data;
+  } catch (error) {
+    if (error?.name === "AbortError" && request.didTimeout()) {
+      throw new Error("Search timed out. Try narrowing your sources or query.");
+    }
+    throw error;
+  } finally {
+    request.cleanup();
+  }
 }
 
 export async function fetchSuggestions(query) {

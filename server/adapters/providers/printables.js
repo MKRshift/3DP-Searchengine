@@ -111,11 +111,11 @@ export function printablesLinkProvider() {
       const perPage = Math.min(limit, 24);
       const url = buildSearchUrl(q) + `&page=${page}`;
       try {
-        const html = await fetchText(url, { timeoutMs: 12_000 });
+        const html = await fetchText(url, { timeoutMs: 6_000, retries: 0 });
         return parseResults(html, perPage, q).slice(0, perPage);
       } catch {
         try {
-          const mirror = await fetchText(`https://r.jina.ai/${url}`, { timeoutMs: 20_000, retries: 0 });
+          const mirror = await fetchText(`https://r.jina.ai/${url}`, { timeoutMs: 7_000, retries: 0 });
           const parsed = parseMirrorMarkdown(mirror, perPage);
           return parsed.length ? parsed : parseResults("", perPage, q).slice(0, perPage);
         } catch {

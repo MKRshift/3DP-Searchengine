@@ -288,6 +288,14 @@ function countByTabs(items) {
   };
 }
 
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function shouldSkipProvider(providerId) {
   const state = providerCircuit.get(providerId);
   if (!state) return false;
@@ -366,7 +374,7 @@ export async function executeSearch({ query, providers }) {
       limiter(async () => {
         try {
           const p0 = Date.now();
-          const providerPayload = await provider.search({ q: intent.expandedQuery, limit, page, sort, tab: normalizedTab });
+          const providerPayload = await withTimeout(provider.search({ q: intent.expandedQuery, limit, page, sort, tab: normalizedTab }), 9_000, provider.id);
           const providerResults = normalizeAdapterPayload(providerPayload);
           providerPageCounts.push({ id: provider.id, count: Array.isArray(providerResults) ? providerResults.length : 0 });
           for (const item of providerResults) {

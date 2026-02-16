@@ -137,7 +137,7 @@ export function makerworldLinkProvider() {
       let data = null;
       for (const url of candidates) {
         try {
-          data = await fetchJson(url, { timeoutMs: 12_000, headers });
+          data = await fetchJson(url, { timeoutMs: 6_000, retries: 0, headers });
           if (extractItems(data).length) break;
         } catch {
           // try next candidate
@@ -184,7 +184,7 @@ export function makerworldLinkProvider() {
       let captchaDetected = false;
       for (const htmlUrl of htmlCandidates) {
         try {
-          const html = await fetchText(htmlUrl, { timeoutMs: 12_000, headers });
+          const html = await fetchText(htmlUrl, { timeoutMs: 6_000, retries: 0, headers });
           const parsed = parseHtmlFallback(html, limit);
           if (parsed.length) return parsed;
           if (/security verification|captcha|just a moment|cloudflare/i.test(html)) captchaDetected = true;
@@ -193,7 +193,7 @@ export function makerworldLinkProvider() {
         }
 
         try {
-          const mirror = await fetchText(`https://r.jina.ai/${htmlUrl}`, { timeoutMs: 20_000, retries: 0 });
+          const mirror = await fetchText(`https://r.jina.ai/${htmlUrl}`, { timeoutMs: 7_000, retries: 0 });
           const parsed = parseHtmlFallback(mirror, limit);
           if (parsed.length) return parsed;
           if (/requiring CAPTCHA|security verification|just a moment|forbidden/i.test(mirror)) captchaDetected = true;

@@ -92,7 +92,7 @@ export function cgtraderProvider() {
       const slug = slugifyQuery(q);
       const directUrl = `https://www.cgtrader.com/3d-models/${slug}`;
       try {
-        const html = await fetchText(directUrl, { timeoutMs: 15_000 });
+        const html = await fetchText(directUrl, { timeoutMs: 6_000, retries: 0 });
         const items = parseItems(html, limit);
         if (items.length) return items;
       } catch {
@@ -100,7 +100,7 @@ export function cgtraderProvider() {
       }
 
       try {
-        const mirror = await fetchText(`https://r.jina.ai/${directUrl}`, { timeoutMs: 20_000, retries: 0 });
+        const mirror = await fetchText(`https://r.jina.ai/${directUrl}`, { timeoutMs: 7_000, retries: 0 });
         const items = parseMirrorMarkdown(mirror, limit);
         if (items.length) return items;
         if (/requiring CAPTCHA|security verification|Just a moment/i.test(mirror)) return [buildFallbackLink(q, { captcha: true })];
