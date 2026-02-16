@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { rankAndDedupe } from "../src/lib/rank.js";
+import { rankAndDedupe } from "../server/lib/rank.js";
 
 test("rankAndDedupe merges canonical duplicates across providers", () => {
   const results = rankAndDedupe([

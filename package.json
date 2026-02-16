@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node src/server.js",
-    "start": "node src/server.js",
-    "lint": "find src public test -name '*.js' -print0 | xargs -0 -n1 node --check",
+    "dev": "node server/index.js",
+    "start": "node server/index.js",
+    "lint": "find server web test -name *.js -print0 | xargs -0 -n1 node --check",
     "test": "node --test",
-    "deps:update": "npx npm-check-updates -u"
+    "deps:update": "npx npm-check-updates -u",
+    "build:web": "node scripts/build-web.mjs",
+    "build": "npm run build:web"
   },
   "engines": {
     "node": ">=20"

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D Meta Search</title>
+  <link rel="stylesheet" href="/src/styles/tokens.css" />
+  <link rel="stylesheet" href="/src/styles/base.css" />
+  <link rel="stylesheet" href="/src/styles/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar__inner">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true"></div>
+        <div>
+          <strong>3D Meta Search</strong>
+          <small>MakerWorld-style multi-platform search</small>
+        </div>
+      </div>
+
+      <form id="search-form" class="search" autocomplete="off">
+        <label class="search__field">
+          <span class="search__icon" aria-hidden="true"></span>
+          <input id="search-query" type="text" placeholder="Search models, users, collections, posts" />
+          <button id="search-clear" class="search__clear" type="button" style="display:none" aria-label="Clear search">×</button>
+          <div id="search-suggest" class="search-suggest" style="display:none"></div>
+        </label>
+        <select id="search-sort" class="select" title="Sort results">
+          <option value="relevant">Relevance</option>
+          <option value="trending">Trending</option>
+          <option value="boosts">Boosts</option>
+          <option value="newest">Newest</option>
+          <option value="downloads">Downloads</option>
+          <option value="likes">Likes</option>
+          <option value="views">Views</option>
+        </select>
+        <button id="theme-toggle" class="button theme-toggle" type="button" aria-label="Change theme">Theme: System</button>
+        <button class="button button--primary" type="submit">Search</button>
+      </form>
+    </div>
+  </header>
+
+  <div class="container tabs-row" id="search-tabs"></div>
+
+  <div class="layout container">
+    <aside class="panel filters">
+      <h2>Platforms</h2>
+      <p>Toggle platform sources. API-backed providers return rich cards, while link-only sources stay searchable with direct cards.</p>
+      <div id="sources-list"></div>
+    </aside>
+
+    <main class="panel">
+      <div class="provider-status" id="provider-status"></div>
+      <div class="panel__head">
+        <h1 id="results-title">Models</h1>
+        <div class="panel__headRight">
+          <div class="densityToggle">
+            <button type="button" data-density="comfortable" class="is-active">Comfortable</button>
+            <button type="button" data-density="compact">Compact</button>
+          </div>
+          <div id="results-status">Ready.</div>
+        </div>
+      </div>
+      <div id="quick-links" class="quick-links" style="display:none"></div>
+      <div id="query-chips" class="query-chips" style="display:none"></div>
+      <div id="facet-filters" class="facet-filters" style="display:none"></div>
+      <div id="errors" style="display:none"></div>
+      <div id="results-grid" class="grid"></div>
+      <div id="results-sentinel" class="sentinel"></div>
+    </main>
+  </div>
+
+  <button id="scroll-top" class="scroll-top" style="display:none">Top</button>
+  <div id="preview-drawer" class="preview-drawer"></div>
+
+  <script type="module" src="/src/pages/SearchPage.js"></script>
+</body>
+</html>

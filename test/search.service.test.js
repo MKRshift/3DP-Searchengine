@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { executeSearch } from "../src/services/search.service.js";
+import { executeSearch } from "../server/services/search.service.js";
 
 test("executeSearch returns link results for link providers", async () => {
   const providers = {
