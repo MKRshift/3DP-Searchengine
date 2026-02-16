@@ -33,13 +33,14 @@ const elements = {
 };
 
 const state = {
-  sources: [], sourceIds: [], selected: new Set(), requestController: null, debounceTimer: null, suggestTimer: null,
+  sources: [], sourceIds: [], selected: new Set(), debounceTimer: null, suggestTimer: null,
   suggestItems: { popular: [], recent: [], items: [] }, highlightedSuggest: { popular: -1, recent: -1, items: -1 },
   page: 1, loadingMore: false, hasMore: true, activeTab: "models",
   tabCounts: { models: 0, "laser-cut": 0, users: 0, collections: 0, posts: 0 }, filters: { license: "", format: "", price: "", timeRange: "" }, chips: [],
   openGroups: new Set(), lastFocus: null,
   autoFillPasses: 0,
   lastPageCount: 0,
+  searchSeq: 0,
 };
 
 const emptySuggestionGroups = () => ({ popular: [], recent: [], items: [] });
@@ -160,23 +161,23 @@ function triggerSearchFromInput(raw) {
 
 async function runSearch(query, { reset = true, pushUrl = true } = {}) {
   if (!query) return;
+  const seq = ++state.searchSeq;
   setSearchViewMode("search");
   if (pushUrl) syncUrl();
   if (reset) {
     state.page = 1;
     state.hasMore = true;
+    state.loadingMore = false;
     renderSkeleton(elements.grid);
   }
-
-  if (state.requestController) state.requestController.abort();
-  state.requestController = new AbortController();
 
   setButtonLoading(elements.submit, true);
   renderErrors(elements.errors, []);
   elements.status.textContent = reset ? "Searching…" : "Loading more…";
 
   try {
-    const data = await fetchSearch({ query, sort: elements.sort.value, tab: state.activeTab, selected: state.selected, page: state.page, filters: state.filters, signal: state.requestController.signal });
+    const data = await fetchSearch({ query, sort: elements.sort.value, tab: state.activeTab, selected: state.selected, page: state.page, filters: state.filters });
+    if (seq !== state.searchSeq) return;
     state.tabCounts = data.tabCounts || state.tabCounts;
     state.chips = data.queryChips || [];
     updateTabs();
@@ -219,11 +220,11 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
       await runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
     }
   } catch (error) {
-    if (error.name !== "AbortError") {
-      elements.status.textContent = `⚠️ ${error.message}`;
-      renderResultGrid(elements.grid, []);
-    }
+    if (seq !== state.searchSeq) return;
+    elements.status.textContent = `⚠️ ${error.message}`;
+    renderResultGrid(elements.grid, []);
   } finally {
+    if (seq !== state.searchSeq) return;
     state.loadingMore = false;
     setButtonLoading(elements.submit, false);
   }
