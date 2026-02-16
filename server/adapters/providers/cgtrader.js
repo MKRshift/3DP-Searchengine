@@ -1,20 +1,50 @@
-import { fetchJson } from "../../lib/http.js";
+import { fetchText } from "../../lib/http.js";
+import { pickImageFromSnippet, titleFromPath } from "../../lib/htmlExtract.js";
 
-function pickThumb(it) {
-  const candidates = [
-    it?.previewImage,
-    it?.preview_image,
-    it?.thumbnail,
-    it?.thumb,
-    it?.images?.[0]?.url,
-    it?.images?.[0],
-  ].filter(Boolean);
-  return candidates[0] ?? null;
+function buildFallbackLink(q) {
+  return {
+    source: "cgtrader",
+    id: `cgtrader:link:${q}`,
+    title: `Search “${q}” on CGTrader`,
+    url: `https://www.cgtrader.com/3d-models?keywords=${encodeURIComponent(q)}`,
+    thumbnail: null,
+    author: "Direct platform search",
+    meta: { tags: ["external-search"] },
+    score: 0.1,
+  };
+}
+
+function parseItems(html, limit) {
+  const items = [];
+  const seen = new Set();
+  const re = /href="(\/3d-models\/[^"?#]+)"[^>]*>/gi;
+  let match;
+
+  while ((match = re.exec(html)) && items.length < limit) {
+    const path = match[1];
+    if (seen.has(path)) continue;
+    seen.add(path);
+
+    const around = html.slice(Math.max(0, match.index - 1400), Math.min(html.length, match.index + 2200));
+    const titleMatch = around.match(/(?:title|aria-label)="([^"]{3,200})"/i);
+    const thumbnail = pickImageFromSnippet(around, "https://www.cgtrader.com");
+
+    items.push({
+      source: "cgtrader",
+      id: path,
+      title: (titleMatch?.[1] || titleFromPath(path, "CGTrader result")).trim(),
+      url: `https://www.cgtrader.com${path}`,
+      thumbnail,
+      author: "",
+      meta: {},
+      score: 1,
+    });
+  }
+
+  return items;
 }
 
 export function cgtraderProvider() {
-  const bearer = process.env.CGTRADER_BEARER_TOKEN?.trim();
-
   return {
     id: "cgtrader",
     label: "CGTrader",
@@ -22,49 +52,22 @@ export function cgtraderProvider() {
     homepage: "https://www.cgtrader.com",
     iconUrl: "https://www.google.com/s2/favicons?domain=cgtrader.com&sz=64",
     searchUrlTemplate: "https://www.cgtrader.com/3d-models?keywords={q}",
-    isPublic: false,
-    notes: bearer ? "bearer token set ✅" : "needs CGTRADER_BEARER_TOKEN ⚠️",
+    isPublic: true,
+    notes: "Public search parser (tokenless)",
     isConfigured() {
-      return Boolean(bearer);
+      return true;
     },
     async search({ q, limit, page }) {
-      if (!bearer) throw new Error("CGTRADER_BEARER_TOKEN not set");
-
-      const url = new URL("https://api.cgtrader.com/v1/models");
-      url.searchParams.set("keywords", q); // per CGTrader docs
-      url.searchParams.set("page", String(page));
-      // CGTrader docs don't clearly specify per_page in the snippet; keep it simple.
-      // If you want, add url.searchParams.set("per_page", String(limit))
-
-      const headers = { Authorization: `Bearer ${bearer}` };
-      const data = await fetchJson(url.toString(), { headers });
-
-      const items =
-        Array.isArray(data) ? data :
-        Array.isArray(data?.items) ? data.items :
-        Array.isArray(data?.models) ? data.models :
-        [];
-
-      return items.slice(0, limit).map((it) => {
-        const id = it?.id ?? it?.uid ?? "";
-        const title = it?.title ?? it?.name ?? "Untitled";
-        const urlPublic = it?.url ?? it?.public_url ?? it?.link ?? null;
-        const author = it?.author?.username ?? it?.user?.username ?? it?.seller?.username ?? "";
-
-        const rating = Number(it?.rating ?? it?.avg_rating ?? 0);
-        const price = it?.price ?? it?.formatted_price ?? null;
-
-        return {
-          source: "cgtrader",
-          id: String(id),
-          title,
-          url: urlPublic,
-          thumbnail: pickThumb(it),
-          author,
-          meta: { rating, price },
-          score: rating * 10,
-        };
-      });
+      try {
+        const url = new URL("https://www.cgtrader.com/3d-models");
+        url.searchParams.set("keywords", q);
+        url.searchParams.set("page", String(page));
+        const html = await fetchText(url.toString(), { timeoutMs: 15_000 });
+        const items = parseItems(html, limit);
+        return items.length ? items : [buildFallbackLink(q)];
+      } catch {
+        return [buildFallbackLink(q)];
+      }
     },
   };
 }
