@@ -1,10 +1,13 @@
-import { cache } from "../lib/cache.js";
+import pLimit from "p-limit";
+
+import { cache } from "./cache.service.js";
 import { rankAndDedupe } from "../lib/rank.js";
 import { safeNumber, parseCsv } from "../lib/validate.js";
 import { parseAdvancedQuery } from "../lib/query.js";
 import { buildLinkResults } from "../lib/server/buildLinkResults.js";
 import { buildSearchUrl } from "../lib/server/buildSearchUrl.js";
 import { enrichResult } from "../lib/server/enrichResult.js";
+import { AdapterValidationError, normalizeAdapterPayload } from "./normalize.service.js";
 import synonyms from "../lib/config/synonyms.json" with { type: "json" };
 
 const recentQueries = [];
@@ -123,28 +126,6 @@ function providerState(provider, errorMap) {
   if (errorMap.has(provider.id)) return "error";
   if (provider.isConfigured() || provider.isPublic) return "ok";
   return "warn";
-}
-
-function createLimiter(concurrency) {
-  let active = 0;
-  const queue = [];
-  function runNext() {
-    if (active >= concurrency || queue.length === 0) return;
-    active += 1;
-    const { task, resolve, reject } = queue.shift();
-    task()
-      .then(resolve)
-      .catch(reject)
-      .finally(() => {
-        active -= 1;
-        runNext();
-      });
-  }
-  return (task) =>
-    new Promise((resolve, reject) => {
-      queue.push({ task, resolve, reject });
-      runNext();
-    });
 }
 
 function matchesTab(item, tab) {
@@ -302,7 +283,7 @@ export async function executeSearch({ query, providers }) {
     return { status: 200, payload: { ...cached, quickLinks, cached: true, tookMs: Date.now() - t0 } };
   }
 
-  const limiter = createLimiter(4);
+  const limiter = pLimit(4);
   const results = [];
   const errors = [];
 
@@ -311,8 +292,19 @@ export async function executeSearch({ query, providers }) {
       limiter(async () => {
         try {
           const p0 = Date.now();
-          const providerResults = await provider.search({ q: intent.expandedQuery, limit, page, sort, tab });
-          for (const item of providerResults) results.push(applyBoost(enrichResult(item, providers), intent));
+          const providerPayload = await provider.search({ q: intent.expandedQuery, limit, page, sort, tab });
+          const providerResults = normalizeAdapterPayload(providerPayload);
+          for (const item of providerResults) {
+            try {
+              results.push(applyBoost(enrichResult(item, providers), intent));
+            } catch (error) {
+              if (error instanceof AdapterValidationError) {
+                errors.push({ source: provider.id, message: error.message });
+                continue;
+              }
+              throw error;
+            }
+          }
           recordProviderOutcome(provider.id, true);
           recordLatency(provider.id, Date.now() - p0, true);
         } catch (error) {
