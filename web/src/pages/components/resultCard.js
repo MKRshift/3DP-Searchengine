@@ -60,6 +60,17 @@ function previewPayload(item) {
   }));
 }
 
+
+function isDirectFallback(item) {
+  const author = (item.creatorName || item.author || "").toString().trim().toLowerCase();
+  if (author !== "direct platform search") return false;
+  const tags = Array.isArray(item?.meta?.tags) ? item.meta.tags.map((x) => String(x).toLowerCase()) : [];
+  const stats = item.stats || item.meta || {};
+  const hasStats = [stats.likes, stats.downloads ?? stats.download_count ?? stats.collects, stats.views ?? stats.visits]
+    .some((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+  return tags.includes("external-search") && !hasStats;
+}
+
 function sourceVariants(item) {
   if (!Array.isArray(item.alsoFoundOn) || item.alsoFoundOn.length < 2) return "";
   const extras = item.alsoFoundOn.slice(1, 5).map((source) => `<span class="card__variant">${esc(source)}</span>`).join("");
@@ -79,12 +90,13 @@ function buildCard(item) {
 }
 
 export function renderResultGrid(root, items, { append = false } = {}) {
-  if (!items?.length && !append) {
+  const visibleItems = (items || []).filter((item) => !isDirectFallback(item));
+  if (!visibleItems.length && !append) {
     root.innerHTML = `<div class="empty">No results found. Try broader keywords, switch category, or clear source filters.<div style="margin-top:8px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap"><span class="query-chip">Try: bracket</span><span class="query-chip">Try: organizer</span><span class="query-chip">Try: lamp</span></div></div>`;
     return;
   }
 
-  const html = items.map(buildCard).join("");
+  const html = visibleItems.map(buildCard).join("");
   if (append) root.insertAdjacentHTML("beforeend", html);
   else root.innerHTML = html;
 }
