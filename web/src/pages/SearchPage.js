@@ -199,25 +199,27 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
     elements.status.textContent = `${Array.isArray(data.results) ? data.results.length : 0}${state.hasMore ? "+" : ""} cards`;
     const prev = elements.grid.querySelector("#grid-load-more");
     if (prev) prev.remove();
-    const btn = document.createElement("button");
-    btn.id = "grid-load-more";
-    btn.type = "button";
-    btn.className = "button";
-    btn.textContent = "Load more";
-    btn.style.gridColumn = "1 / -1";
-    btn.addEventListener("click", () => {
-      if (state.loadingMore) return;
-      state.loadingMore = true;
-      state.page += 1;
-      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
-    });
-    elements.grid.appendChild(btn);
-    if (!reset) state.autoFillPasses = 0;
+    if (state.hasMore) {
+      const btn = document.createElement("button");
+      btn.id = "grid-load-more";
+      btn.type = "button";
+      btn.className = "button";
+      btn.textContent = "Load more";
+      btn.style.gridColumn = "1 / -1";
+      btn.addEventListener("click", () => {
+        if (state.loadingMore) return;
+        state.loadingMore = true;
+        state.page += 1;
+        runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+      });
+      elements.grid.appendChild(btn);
+    }
+
     if (state.hasMore && state.autoFillPasses < 4 && document.body.scrollHeight <= window.innerHeight + 200) {
       state.autoFillPasses += 1;
       state.loadingMore = true;
       state.page += 1;
-      await runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+      await runSearch(normalizedQuery, { reset: false, pushUrl: false });
     }
   } catch (error) {
     if (seq !== state.searchSeq) return;
@@ -347,6 +349,11 @@ function bindEvents() {
   });
 
   elements.clear.addEventListener("click", () => {
+    if (state.searchController && !state.searchController.signal.aborted) state.searchController.abort();
+    state.searchSeq += 1;
+    state.loadingMore = false;
+    setButtonLoading(elements.submit, false);
+    elements.status.textContent = "Ready.";
     elements.query.value = "";
     elements.clear.style.display = "none";
     renderSuggestDropdown({ root: elements.suggest, suggestions: emptySuggestionGroups(), visible: false });
@@ -362,7 +369,7 @@ function bindEvents() {
   // Infinite scroll across desktop (grid scroll container) and mobile (window scroll)
   function maybeLoadMoreForWindow() {
     if (state.loadingMore) return;
-    if (!state.hasMore && state.lastPageCount === 0) return;
+    if (!state.hasMore) return;
     const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 200;
     if (nearBottom) {
       state.loadingMore = true;
@@ -372,7 +379,7 @@ function bindEvents() {
   }
   function maybeLoadMoreForGrid() {
     if (state.loadingMore) return;
-    if (!state.hasMore && state.lastPageCount === 0) return;
+    if (!state.hasMore) return;
     const el = elements.grid;
     const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 120;
     if (nearBottom) {

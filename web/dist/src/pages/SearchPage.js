@@ -347,6 +347,11 @@ function bindEvents() {
   });
 
   elements.clear.addEventListener("click", () => {
+    if (state.searchController && !state.searchController.signal.aborted) state.searchController.abort();
+    state.searchSeq += 1;
+    state.loadingMore = false;
+    setButtonLoading(elements.submit, false);
+    elements.status.textContent = "Ready.";
     elements.query.value = "";
     elements.clear.style.display = "none";
     renderSuggestDropdown({ root: elements.suggest, suggestions: emptySuggestionGroups(), visible: false });
