@@ -28,14 +28,19 @@ const elements = {
   suggest: document.querySelector("#search-suggest"), sentinel: document.querySelector("#results-sentinel"), topButton: document.querySelector("#scroll-top"),
   densityButtons: document.querySelectorAll("[data-density]"), previewDrawer: document.querySelector("#preview-drawer"),
   filterDrawer: document.querySelector("#filters-drawer"), filterPanel: document.querySelector(".filter-drawer__panel"), railItems: document.querySelectorAll("#category-rail [data-tab]"),
+  landingView: document.querySelector("#landing-view"), searchView: document.querySelector("#search-view"),
+  landingQuery: document.querySelector("#landing-query"), landingStart: document.querySelector("#landing-start"),
 };
 
 const state = {
-  sources: [], sourceIds: [], selected: new Set(), requestController: null, debounceTimer: null, suggestTimer: null,
+  sources: [], sourceIds: [], selected: new Set(), debounceTimer: null, suggestTimer: null,
   suggestItems: { popular: [], recent: [], items: [] }, highlightedSuggest: { popular: -1, recent: -1, items: -1 },
   page: 1, loadingMore: false, hasMore: true, activeTab: "models",
   tabCounts: { models: 0, "laser-cut": 0, users: 0, collections: 0, posts: 0 }, filters: { license: "", format: "", price: "", timeRange: "" }, chips: [],
   openGroups: new Set(), lastFocus: null,
+  autoFillPasses: 0,
+  lastPageCount: 0,
+  searchSeq: 0,
 };
 
 const emptySuggestionGroups = () => ({ popular: [], recent: [], items: [] });
@@ -139,24 +144,40 @@ function updateRailActive() {
   elements.railItems.forEach((item) => item.classList.toggle("is-active", item.dataset.tab === state.activeTab));
 }
 
+function setSearchViewMode(mode) {
+  const searching = mode === "search";
+  elements.landingView.style.display = searching ? "none" : "block";
+  elements.searchView.style.display = searching ? "block" : "none";
+}
+
+function triggerSearchFromInput(raw) {
+  const query = (raw || "").trim();
+  if (!query) return;
+  setSearchViewMode("search");
+  elements.query.value = query;
+  elements.clear.style.display = "inline-block";
+  runSearch(query, { reset: true });
+}
+
 async function runSearch(query, { reset = true, pushUrl = true } = {}) {
   if (!query) return;
+  const seq = ++state.searchSeq;
+  setSearchViewMode("search");
   if (pushUrl) syncUrl();
   if (reset) {
     state.page = 1;
     state.hasMore = true;
+    state.loadingMore = false;
     renderSkeleton(elements.grid);
   }
-
-  if (state.requestController) state.requestController.abort();
-  state.requestController = new AbortController();
 
   setButtonLoading(elements.submit, true);
   renderErrors(elements.errors, []);
   elements.status.textContent = reset ? "Searching…" : "Loading more…";
 
   try {
-    const data = await fetchSearch({ query, sort: elements.sort.value, tab: state.activeTab, selected: state.selected, page: state.page, filters: state.filters, signal: state.requestController.signal });
+    const data = await fetchSearch({ query, sort: elements.sort.value, tab: state.activeTab, selected: state.selected, page: state.page, filters: state.filters });
+    if (seq !== state.searchSeq) return;
     state.tabCounts = data.tabCounts || state.tabCounts;
     state.chips = data.queryChips || [];
     updateTabs();
@@ -165,20 +186,45 @@ async function runSearch(query, { reset = true, pushUrl = true } = {}) {
 
     const results = [...(data.results || []), ...(data.linkResults || [])];
     renderResultGrid(elements.grid, results, { append: !reset });
-    state.hasMore = results.length >= 24;
+    state.lastPageCount = Array.isArray(data.results) ? data.results.length : 0;
+    const serverHasMore = data.hasMore;
+    const defaultHasMore = state.lastPageCount > 0;
+    state.hasMore = serverHasMore === undefined ? defaultHasMore : Boolean(serverHasMore);
 
     renderQuickLinks(elements.quickLinks, data.quickLinks || []);
     renderErrors(elements.errors, data.errors || []);
     renderProviderStatus(elements.providerStatus, data.providerStatus || []);
 
     elements.title.textContent = `${TAB_LABELS[state.activeTab] || "Results"} (${state.tabCounts[state.activeTab] || 0})`;
-    elements.status.textContent = `${results.length} cards`;
-  } catch (error) {
-    if (error.name !== "AbortError") {
-      elements.status.textContent = `⚠️ ${error.message}`;
-      renderResultGrid(elements.grid, []);
+    elements.status.textContent = `${Array.isArray(data.results) ? data.results.length : 0}${state.hasMore ? "+" : ""} cards`;
+    const prev = elements.grid.querySelector("#grid-load-more");
+    if (prev) prev.remove();
+    const btn = document.createElement("button");
+    btn.id = "grid-load-more";
+    btn.type = "button";
+    btn.className = "button";
+    btn.textContent = "Load more";
+    btn.style.gridColumn = "1 / -1";
+    btn.addEventListener("click", () => {
+      if (state.loadingMore) return;
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    });
+    elements.grid.appendChild(btn);
+    if (!reset) state.autoFillPasses = 0;
+    if (state.hasMore && state.autoFillPasses < 4 && document.body.scrollHeight <= window.innerHeight + 200) {
+      state.autoFillPasses += 1;
+      state.loadingMore = true;
+      state.page += 1;
+      await runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
     }
+  } catch (error) {
+    if (seq !== state.searchSeq) return;
+    elements.status.textContent = `⚠️ ${error.message}`;
+    renderResultGrid(elements.grid, []);
   } finally {
+    if (seq !== state.searchSeq) return;
     state.loadingMore = false;
     setButtonLoading(elements.submit, false);
   }
@@ -228,7 +274,9 @@ async function initSources() {
 }
 
 function bindEvents() {
-  elements.form.addEventListener("submit", (event) => { event.preventDefault(); runSearch(elements.query.value.trim(), { reset: true }); });
+  elements.form.addEventListener("submit", (event) => { event.preventDefault(); triggerSearchFromInput(elements.query.value); });
+  elements.landingStart.addEventListener("click", () => triggerSearchFromInput(elements.landingQuery.value));
+  elements.landingQuery.addEventListener("keydown", (event) => { if (event.key === "Enter") triggerSearchFromInput(elements.landingQuery.value); });
   elements.themeToggle.addEventListener("click", () => {
     const current = localStorage.getItem(THEME_KEY) || "system";
     const next = THEME_ORDER[(THEME_ORDER.indexOf(current) + 1) % THEME_ORDER.length];
@@ -311,6 +359,50 @@ function bindEvents() {
   });
   elements.topButton.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 
+  // Infinite scroll across desktop (grid scroll container) and mobile (window scroll)
+  function maybeLoadMoreForWindow() {
+    if (state.loadingMore) return;
+    if (!state.hasMore && state.lastPageCount === 0) return;
+    const nearBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 200;
+    if (nearBottom) {
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    }
+  }
+  function maybeLoadMoreForGrid() {
+    if (state.loadingMore) return;
+    if (!state.hasMore && state.lastPageCount === 0) return;
+    const el = elements.grid;
+    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 120;
+    if (nearBottom) {
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    }
+  }
+  elements.grid.addEventListener("scroll", maybeLoadMoreForGrid);
+  window.addEventListener("scroll", maybeLoadMoreForWindow);
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (!entry.isIntersecting) return;
+      if (state.loadingMore || !state.hasMore) return;
+      state.loadingMore = true;
+      state.page += 1;
+      runSearch(elements.query.value.trim(), { reset: false, pushUrl: false });
+    }, { root: null, rootMargin: "120px", threshold: 0 });
+    io.observe(elements.sentinel);
+    // Also observe the grid "load more" button when present
+    const observeLoadMore = () => {
+      const btn = elements.grid.querySelector("#grid-load-more");
+      if (btn) io.observe(btn);
+    };
+    const mo = new MutationObserver(observeLoadMore);
+    mo.observe(elements.grid, { childList: true });
+    observeLoadMore();
+  }
+
   window.addEventListener("beforeunload", () => { unbindOutsideSuggest(); unbindOutsideDrawer(); });
 }
 
@@ -322,9 +414,18 @@ function bindEvents() {
 
   const initial = readUrlState();
   elements.sort.value = initial.sort || "relevant";
-  elements.query.value = (initial.keyword || "hello").trim();
-  elements.clear.style.display = elements.query.value ? "inline-block" : "none";
   elements.timeframe.value = initial.timeRange || "";
-  syncUrl();
-  runSearch(elements.query.value, { reset: true, pushUrl: false });
+
+  const initialKeyword = (initial.keyword || "").trim();
+  elements.query.value = initialKeyword;
+  elements.landingQuery.value = initialKeyword;
+  elements.clear.style.display = initialKeyword ? "inline-block" : "none";
+
+  if (initialKeyword) {
+    setSearchViewMode("search");
+    syncUrl();
+    runSearch(initialKeyword, { reset: true, pushUrl: false });
+  } else {
+    setSearchViewMode("landing");
+  }
 })();

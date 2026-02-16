@@ -24,6 +24,22 @@ function jsonResponse(payload, { status = 200, statusText = "OK", contentType = 
   };
 }
 
+
+function textResponse(payload, { status = 200, statusText = "OK", contentType = "text/html" } = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText,
+    headers: { get: (name) => (name.toLowerCase() === "content-type" ? contentType : null) },
+    async json() {
+      return JSON.parse(payload);
+    },
+    async text() {
+      return payload;
+    },
+  };
+}
+
 function withMockFetch(sequence, fn) {
   const original = global.fetch;
   const calls = [];
@@ -57,20 +73,12 @@ function assertContractShape(results, source) {
 }
 
 test("api adapters return normalized contract fields on success", async () => {
-  process.env.SKETCHFAB_TOKEN = "token";
-  process.env.MMF_API_KEY = "mmf-key";
-  process.env.CGTRADER_BEARER_TOKEN = "bearer";
-  process.env.CULTS_BASIC_USER = "user";
-  process.env.CULTS_BASIC_PASS = "pass";
-  process.env.THINGIVERSE_TOKEN = "thing-token";
-  process.env.SMITHSONIAN_API_KEY = "si-key";
-
   await withMockFetch([
     jsonResponse({ results: [{ uid: "s1", name: "Sketch Gear", viewerUrl: "https://sketchfab.com/models/s1", user: { username: "alice" }, likeCount: 12, viewCount: 300 }] }),
-    jsonResponse({ items: [{ id: 11, name: "MMF Gear", url: "https://mmf.example/11", owner: { username: "bob" }, likes: 4, visits: 20 }] }),
-    jsonResponse({ items: [{ id: 12, title: "CG Gear", url: "https://cg.example/12", author: { username: "eve" }, rating: 4.2 }] }),
-    jsonResponse({ data: { creations: [{ id: 13, name: "Cults Gear", url: "https://cults.example/13", creator: { nick: "maker" } }] } }),
-    jsonResponse([{ id: 14, name: "Thing Gear", public_url: "https://thing.example/14", creator: { username: "zoe" }, like_count: 7, collect_count: 2 }]),
+    textResponse('<a href="/object/3d-print-mmf-gear">MMF Gear</a>'),
+    textResponse('<a href="/3d-models/cg-gear" title="CG Gear">CG</a>'),
+    textResponse('<a href="/en/3d-model/cults-gear">Cults</a>'),
+    textResponse('<a href="/thing:14" title="Thing Gear">Thing</a>'),
     jsonResponse({ tree: [{ type: "blob", path: "models/gear.stl", sha: "sha-gear" }] }),
     jsonResponse({ response: { rows: [{ id: "si-15", title: "Smith Gear", content: { descriptiveNonRepeating: { record_link: "https://si.example/15", online_media: { media: [{ thumbnail: "https://si.example/thumb.png" }] } } } }] } }),
   ], async () => {
@@ -93,26 +101,20 @@ test("api adapters return normalized contract fields on success", async () => {
 });
 
 test("adapters gracefully degrade malformed payloads to empty arrays", async () => {
-  process.env.SKETCHFAB_TOKEN = "token";
-  process.env.MMF_API_KEY = "mmf-key";
-  process.env.CGTRADER_BEARER_TOKEN = "bearer";
-  process.env.CULTS_BASIC_USER = "user";
-  process.env.CULTS_BASIC_PASS = "pass";
-  process.env.THINGIVERSE_TOKEN = "thing-token";
-  process.env.SMITHSONIAN_API_KEY = "si-key";
-
   await withMockFetch([
     jsonResponse({ unexpected: true }),
-    jsonResponse({ broken: true }),
-    jsonResponse({ nope: true }),
-    jsonResponse({ data: { wrongShape: [] } }),
-    jsonResponse({ noItems: true }),
+    textResponse("<html></html>"),
+    textResponse("<html></html>"),
+    textResponse("<html></html>"),
+    textResponse("<html></html>"),
     jsonResponse({ tree: [{ type: "tree", path: "docs/readme.md" }] }),
     jsonResponse({ response: {} }),
   ], async () => {
     assert.deepEqual(await sketchfabProvider().search({ q: "gear", limit: 5, page: 1 }), []);
     assert.deepEqual(await myMiniFactoryProvider().search({ q: "gear", limit: 5, page: 1 }), []);
-    assert.deepEqual(await cgtraderProvider().search({ q: "gear", limit: 5, page: 1 }), []);
+    const cgFallback = await cgtraderProvider().search({ q: "gear", limit: 5, page: 1 });
+    assert.equal(cgFallback[0]?.source, "cgtrader");
+    assert.match(cgFallback[0]?.url || "", /cgtrader\.com\/3d-models\?keywords=gear/);
     assert.deepEqual(await cultsProvider().search({ q: "gear", limit: 5, page: 1 }), []);
     assert.deepEqual(await thingiverseProvider().search({ q: "gear", limit: 5, page: 1 }), []);
     assert.deepEqual(await nasaProvider().search({ q: "unmatched", limit: 5, page: 1 }), []);
@@ -121,8 +123,6 @@ test("adapters gracefully degrade malformed payloads to empty arrays", async () 
 });
 
 test("adapters surface timeout and 429/5xx errors from HTTP client", async () => {
-  process.env.SKETCHFAB_TOKEN = "token";
-
   await withMockFetch(
     [
       jsonResponse({ message: "busy" }, { status: 429, statusText: "Too Many Requests" }),
