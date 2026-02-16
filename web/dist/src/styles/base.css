@@ -2,12 +2,12 @@
 html, body { margin: 0; }
 body {
   font-family: Inter, system-ui, sans-serif;
-  color: var(--text);
-  background: var(--bg);
+  color: var(--semi-color-text-0);
+  background: var(--semi-color-bg-0);
 }
-a { color: var(--accent); }
+a { color: var(--semi-color-primary); }
 button, input, select { font: inherit; }
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 4px var(--focus);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--semi-color-focus-border) 28%, transparent);
 }
