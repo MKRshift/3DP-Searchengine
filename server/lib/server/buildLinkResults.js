@@ -12,7 +12,7 @@ export function buildLinkResults({ quickLinks, query }) {
         title: `Search “${query}” on ${link.label}`,
         creatorName: "Direct platform search",
         url: link.url,
-        thumbnail: null,
+        thumbnail: link.iconUrl ?? null,
         meta: {
           formats: [],
           tags: ["external-search"],
