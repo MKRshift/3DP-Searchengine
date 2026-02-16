@@ -1,12 +1,5 @@
 import { fetchText } from "../../lib/http.js";
-
-function toAbsoluteUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  if (url.startsWith("//")) return `https:${url}`;
-  if (url.startsWith("/")) return `https://www.cgtrader.com${url}`;
-  return null;
-}
+import { pickImageFromSnippet, titleFromPath } from "../../lib/htmlExtract.js";
 
 function buildFallbackLink(q) {
   return {
@@ -34,18 +27,12 @@ function parseItems(html, limit) {
 
     const around = html.slice(Math.max(0, match.index - 1400), Math.min(html.length, match.index + 2200));
     const titleMatch = around.match(/(?:title|aria-label)="([^"]{3,200})"/i);
-    const slug = path.split("/").pop() || "CGTrader result";
-    const title = (titleMatch?.[1] || decodeURIComponent(slug).replace(/[-_]/g, " ")).trim();
-
-    const srcsetMatch = around.match(/<img[^>]+srcset="([^"]+)"/i);
-    const srcMatch = around.match(/<img[^>]+(?:src|data-src)="([^"]+)"/i);
-    const srcsetUrl = srcsetMatch?.[1]?.split(",")?.pop()?.trim()?.split(" ")?.[0] || null;
-    const thumbnail = toAbsoluteUrl(srcsetUrl || srcMatch?.[1] || "");
+    const thumbnail = pickImageFromSnippet(around, "https://www.cgtrader.com");
 
     items.push({
       source: "cgtrader",
       id: path,
-      title,
+      title: (titleMatch?.[1] || titleFromPath(path, "CGTrader result")).trim(),
       url: `https://www.cgtrader.com${path}`,
       thumbnail,
       author: "",

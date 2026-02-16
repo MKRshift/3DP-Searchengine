@@ -1,4 +1,5 @@
 import { fetchText } from "../../lib/http.js";
+import { pickImageFromSnippet, safeDecode } from "../../lib/htmlExtract.js";
 
 function buildSearchUrl(q) {
   const mode = (process.env.PRINTABLES_MODE || "all").toLowerCase();
@@ -21,20 +22,8 @@ function dedupe(items) {
   return out;
 }
 
-function tryDecode(s) {
-  try { return decodeURIComponent(s); } catch { return s; }
-}
-
-function toAbsoluteUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  if (url.startsWith("//")) return `https:${url}`;
-  if (url.startsWith("/")) return `https://www.printables.com${url}`;
-  return null;
-}
-
 function slugToTitle(slug) {
-  return tryDecode(String(slug || "").replace(/-/g, " ").trim()) || "Untitled";
+  return safeDecode(String(slug || "").replace(/-/g, " ").trim()) || "Untitled";
 }
 
 function parseResults(html, limit, q) {
@@ -58,19 +47,14 @@ function parseResults(html, limit, q) {
     let author = "";
     const authorRe = /href="\/@([^"\/\s]+)"/;
     const a = around.match(authorRe);
-    if (a && a[1]) author = tryDecode(a[1]);
-
-    const srcsetMatch = around.match(/<img[^>]+srcset="([^"]+)"/i);
-    const srcMatch = around.match(/<img[^>]+(?:src|data-src)="([^"]+)"/i);
-    const srcsetUrl = srcsetMatch?.[1]?.split(",")?.pop()?.trim()?.split(" ")?.[0] || null;
-    const thumb = toAbsoluteUrl(srcsetUrl || srcMatch?.[1] || "");
+    if (a && a[1]) author = safeDecode(a[1]);
 
     items.push({
       source: "printables",
       id: String(path),
       title,
       url: `https://www.printables.com${path}`,
-      thumbnail: thumb,
+      thumbnail: pickImageFromSnippet(around, "https://www.printables.com"),
       author,
       meta: {},
       score: 1,

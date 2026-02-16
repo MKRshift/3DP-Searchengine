@@ -8,6 +8,7 @@ import { cultsProvider } from "../../server/adapters/providers/cults.js";
 import { thingiverseProvider } from "../../server/adapters/providers/thingiverse.js";
 import { nasaProvider } from "../../server/adapters/providers/nasa.js";
 import { smithsonianProvider } from "../../server/adapters/providers/smithsonian.js";
+import { makerworldLinkProvider } from "../../server/adapters/providers/makerworld.js";
 
 function jsonResponse(payload, { status = 200, statusText = "OK", contentType = "application/json" } = {}) {
   return {
@@ -76,8 +77,8 @@ test("api adapters return normalized contract fields on success", async () => {
   await withMockFetch([
     jsonResponse({ results: [{ uid: "s1", name: "Sketch Gear", viewerUrl: "https://sketchfab.com/models/s1", user: { username: "alice" }, likeCount: 12, viewCount: 300 }] }),
     textResponse('<a href="/object/3d-print-mmf-gear">MMF Gear</a>'),
-    textResponse('<a href="/3d-models/cg-gear" title="CG Gear">CG</a>'),
-    textResponse('<a href="/en/3d-model/cults-gear">Cults</a>'),
+    textResponse('<a href="/3d-models/cg-gear" title="CG Gear"><img src="/img/cg-gear.jpg"/></a>'),
+    textResponse('<a href="/en/3d-model/cults-gear" title="Cults Gear"><img src="https://cdn.cults3d.com/cults-gear.jpg"/></a>'),
     textResponse('<a href="/thing:14" title="Thing Gear">Thing</a>'),
     jsonResponse({ tree: [{ type: "blob", path: "models/gear.stl", sha: "sha-gear" }] }),
     jsonResponse({ response: { rows: [{ id: "si-15", title: "Smith Gear", content: { descriptiveNonRepeating: { record_link: "https://si.example/15", online_media: { media: [{ thumbnail: "https://si.example/thumb.png" }] } } } }] } }),
@@ -94,6 +95,8 @@ test("api adapters return normalized contract fields on success", async () => {
     assertContractShape(mmf, "mmf");
     assertContractShape(cg, "cgtrader");
     assertContractShape(cults, "cults");
+    assert.match(cg[0]?.thumbnail || "", /cgtrader\.com\/img\/cg-gear\.jpg/);
+    assert.match(cults[0]?.thumbnail || "", /cults-gear\.jpg/);
     assertContractShape(thingiverse, "thingiverse");
     assertContractShape(nasa, "nasa");
     assertContractShape(si, "smithsonian");
@@ -120,6 +123,36 @@ test("adapters gracefully degrade malformed payloads to empty arrays", async () 
     assert.deepEqual(await nasaProvider().search({ q: "unmatched", limit: 5, page: 1 }), []);
     assert.deepEqual(await smithsonianProvider().search({ q: "gear", limit: 5, page: 1 }), []);
   });
+});
+
+
+test("makerworld falls back from empty API payload to HTML parsing and direct link", async () => {
+  const prevOverride = process.env.MAKERWORLD_SEARCH_URL;
+  process.env.MAKERWORLD_SEARCH_URL = "https://makerworld.test/search?q={q}&page={page}&size={size}";
+
+  await withMockFetch([
+    jsonResponse({ items: [] }),
+    textResponse('<a href="/en/models/12345-cool-model" title="Cool Model"><img src="/assets/cool.jpg"/></a>'),
+  ], async () => {
+    const provider = makerworldLinkProvider();
+    const parsed = await provider.search({ q: "cool", limit: 5, page: 1, sort: "relevant" });
+    assert.equal(parsed[0]?.source, "makerworld");
+    assert.match(parsed[0]?.url || "", /makerworld\.com\/en\/models\/12345-cool-model/);
+    assert.match(parsed[0]?.thumbnail || "", /makerworld\.com\/assets\/cool\.jpg/);
+  });
+
+  await withMockFetch([
+    jsonResponse({ items: [] }),
+    textResponse("<html></html>"),
+    textResponse("<html></html>"),
+  ], async () => {
+    const provider = makerworldLinkProvider();
+    const fallback = await provider.search({ q: "cool", limit: 5, page: 1, sort: "relevant" });
+    assert.equal(fallback[0]?.id, "makerworld:link:cool");
+  });
+
+  if (prevOverride === undefined) delete process.env.MAKERWORLD_SEARCH_URL;
+  else process.env.MAKERWORLD_SEARCH_URL = prevOverride;
 });
 
 test("adapters surface timeout and 429/5xx errors from HTTP client", async () => {

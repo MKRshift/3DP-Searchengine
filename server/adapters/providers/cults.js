@@ -1,12 +1,5 @@
 import { fetchText } from "../../lib/http.js";
-
-function toAbsoluteUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  if (url.startsWith("//")) return `https:${url}`;
-  if (url.startsWith("/")) return `https://cults3d.com${url}`;
-  return null;
-}
+import { pickImageFromSnippet, titleFromPath } from "../../lib/htmlExtract.js";
 
 function parseItems(html, limit) {
   const items = [];
@@ -20,20 +13,14 @@ function parseItems(html, limit) {
     seen.add(path);
 
     const around = html.slice(Math.max(0, match.index - 1500), Math.min(html.length, match.index + 2600));
-    const slug = path.split("/").pop() || "cults result";
     const titleMatch = around.match(/(?:title|aria-label)="([^"]{3,200})"/i);
-
-    const srcsetMatch = around.match(/<img[^>]+srcset="([^"]+)"/i);
-    const srcMatch = around.match(/<img[^>]+(?:src|data-src)="([^"]+)"/i);
-    const srcsetUrl = srcsetMatch?.[1]?.split(",")?.pop()?.trim()?.split(" ")?.[0] || null;
-    const thumbnail = toAbsoluteUrl(srcsetUrl || srcMatch?.[1] || "");
 
     items.push({
       source: "cults",
       id: path,
-      title: (titleMatch?.[1] || decodeURIComponent(slug).replace(/[-_]/g, " ")).trim(),
+      title: (titleMatch?.[1] || titleFromPath(path, "Cults result")).trim(),
       url: `https://cults3d.com${path}`,
-      thumbnail,
+      thumbnail: pickImageFromSnippet(around, "https://cults3d.com"),
       author: "",
       meta: {},
       score: 1,

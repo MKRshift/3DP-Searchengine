@@ -1,22 +1,26 @@
 import { fetchText } from "../../lib/http.js";
+import { pickImageFromSnippet, titleFromPath } from "../../lib/htmlExtract.js";
 
 function parseItems(html, limit) {
   const items = [];
-  const re = /href="(\/object\/3d-print-[^"]+)"[^>]*>([\s\S]{0,240}?)/gi;
-  let m;
-  while ((m = re.exec(html)) && items.length < limit) {
-    const path = m[1];
-    const title = (m[2] || "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+  const seen = new Set();
+  const re = /href="(\/object\/3d-print-[^"?#]+)"/gi;
+  let match;
+
+  while ((match = re.exec(html)) && items.length < limit) {
+    const path = match[1];
+    if (seen.has(path)) continue;
+    seen.add(path);
+
+    const around = html.slice(Math.max(0, match.index - 1200), Math.min(html.length, match.index + 2400));
+    const titleMatch = around.match(/(?:title|aria-label)="([^"]{3,200})"/i);
 
     items.push({
       source: "mmf",
       id: path,
-      title: title || "MyMiniFactory result",
+      title: (titleMatch?.[1] || titleFromPath(path, "MyMiniFactory result")).trim(),
       url: `https://www.myminifactory.com${path}`,
-      thumbnail: null,
+      thumbnail: pickImageFromSnippet(around, "https://www.myminifactory.com"),
       author: "",
       meta: {},
       score: 1,

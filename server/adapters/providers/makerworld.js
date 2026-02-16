@@ -1,12 +1,5 @@
 import { fetchJson, fetchText } from "../../lib/http.js";
-
-function toAbsoluteUrl(url) {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  if (url.startsWith("//")) return `https:${url}`;
-  if (url.startsWith("/")) return `https://makerworld.com${url}`;
-  return null;
-}
+import { pickImageFromSnippet, toAbsoluteUrl, titleFromPath } from "../../lib/htmlExtract.js";
 
 function pickThumb(it) {
   const candidates = [
@@ -17,7 +10,7 @@ function pickThumb(it) {
     it?.image,
     it?.thumb,
   ].filter(Boolean);
-  return toAbsoluteUrl(candidates[0] ?? null);
+  return toAbsoluteUrl(candidates[0] ?? null, "https://makerworld.com");
 }
 
 function sortToOrderBy(sort) {
@@ -41,6 +34,19 @@ function buildPublicUrl(id, slug) {
   if (!id) return null;
   const suffix = slug ? `-${slug}` : "";
   return `https://makerworld.com/en/models/${id}${suffix}`;
+}
+
+function buildFallbackLink(q) {
+  return {
+    source: "makerworld",
+    id: `makerworld:link:${q}`,
+    title: `Search “${q}” on MakerWorld`,
+    url: `https://makerworld.com/en/search/models?keyword=${encodeURIComponent(q)}`,
+    thumbnail: null,
+    author: "Direct platform search",
+    meta: { tags: ["external-search"] },
+    score: 0.1,
+  };
 }
 
 function extractItems(data) {
@@ -68,16 +74,12 @@ function parseHtmlFallback(html, limit) {
     const around = html.slice(Math.max(0, match.index - 1800), Math.min(html.length, match.index + 2800));
     const titleMatch = around.match(/(?:title|aria-label)="([^"]{3,200})"/i);
 
-    const srcsetMatch = around.match(/<img[^>]+srcset="([^"]+)"/i);
-    const srcMatch = around.match(/<img[^>]+(?:src|data-src)="([^"]+)"/i);
-    const srcsetUrl = srcsetMatch?.[1]?.split(",")?.pop()?.trim()?.split(" ")?.[0] || null;
-
     items.push({
       source: "makerworld",
       id: path,
-      title: (titleMatch?.[1] || path.split("/").pop() || "MakerWorld result").replace(/[-_]/g, " "),
+      title: (titleMatch?.[1] || titleFromPath(path, "MakerWorld result")).trim(),
       url: `https://makerworld.com${path}`,
-      thumbnail: toAbsoluteUrl(srcsetUrl || srcMatch?.[1] || ""),
+      thumbnail: pickImageFromSnippet(around, "https://makerworld.com"),
       author: "",
       meta: {},
       score: 1,
@@ -174,14 +176,22 @@ export function makerworldLinkProvider() {
         });
       }
 
-      try {
-        const htmlUrl = `${searchUrlTemplate.replace("{q}", encodeURIComponent(q))}&page=${page}`;
-        const html = await fetchText(htmlUrl, { timeoutMs: 12_000, headers });
-        const parsed = parseHtmlFallback(html, limit);
-        return parsed;
-      } catch {
-        return [];
+      const htmlCandidates = [
+        `${searchUrlTemplate.replace("{q}", encodeURIComponent(q))}&page=${page}`,
+        `https://makerworld.com/en/search?keyword=${encodeURIComponent(q)}&page=${page}`,
+      ];
+
+      for (const htmlUrl of htmlCandidates) {
+        try {
+          const html = await fetchText(htmlUrl, { timeoutMs: 12_000, headers });
+          const parsed = parseHtmlFallback(html, limit);
+          if (parsed.length) return parsed;
+        } catch {
+          // try next candidate
+        }
       }
+
+      return [buildFallbackLink(q)];
     },
   };
 }

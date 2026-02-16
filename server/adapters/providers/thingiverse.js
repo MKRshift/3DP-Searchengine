@@ -1,19 +1,25 @@
 import { fetchText } from "../../lib/http.js";
+import { pickImageFromSnippet } from "../../lib/htmlExtract.js";
 
 function parseItems(html, limit) {
   const items = [];
+  const seen = new Set();
   const re = /href="(\/thing:[0-9]+)"/gi;
-  let m;
-  while ((m = re.exec(html)) && items.length < limit) {
-    const path = m[1];
-    const around = html.slice(Math.max(0, m.index - 250), Math.min(html.length, m.index + 450));
-    const titleMatch = around.match(/title="([^"]+)"/i);
+  let match;
+
+  while ((match = re.exec(html)) && items.length < limit) {
+    const path = match[1];
+    if (seen.has(path)) continue;
+    seen.add(path);
+
+    const around = html.slice(Math.max(0, match.index - 1500), Math.min(html.length, match.index + 2600));
+    const titleMatch = around.match(/(?:title|aria-label)="([^"]+)"/i);
     items.push({
       source: "thingiverse",
       id: path.replace("/thing:", ""),
-      title: titleMatch?.[1] || `Thingiverse ${path.replace('/thing:', '#')}`,
+      title: titleMatch?.[1] || `Thingiverse ${path.replace("/thing:", "#")}`,
       url: `https://www.thingiverse.com${path}`,
-      thumbnail: null,
+      thumbnail: pickImageFromSnippet(around, "https://www.thingiverse.com"),
       author: "",
       meta: {},
       score: 1,
