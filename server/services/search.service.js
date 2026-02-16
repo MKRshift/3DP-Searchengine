@@ -288,6 +288,14 @@ function countByTabs(items) {
   };
 }
 
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function shouldSkipProvider(providerId) {
   const state = providerCircuit.get(providerId);
   if (!state) return false;
@@ -366,7 +374,7 @@ export async function executeSearch({ query, providers }) {
       limiter(async () => {
         try {
           const p0 = Date.now();
-          const providerPayload = await provider.search({ q: intent.expandedQuery, limit, page, sort, tab: normalizedTab });
+          const providerPayload = await withTimeout(provider.search({ q: intent.expandedQuery, limit, page, sort, tab: normalizedTab }), 9_000, provider.id);
           const providerResults = normalizeAdapterPayload(providerPayload);
           providerPageCounts.push({ id: provider.id, count: Array.isArray(providerResults) ? providerResults.length : 0 });
           for (const item of providerResults) {
@@ -422,15 +430,15 @@ export async function executeSearch({ query, providers }) {
 
   const diversifiedAll = diversifyBySource(facetedAll);
 
-  const start = (page - 1) * limit;
-  const end = start + limit;
   const allForTab = diversifiedAll.filter((item) => matchesTab(item, normalizedTab));
   const totalForTab = allForTab.length;
-  const finalResults = allForTab.slice(start, end);
+  const finalResults = allForTab.slice(0, limit);
   const linkResults =
     page > 1
       ? []
       : buildLinkResults({ quickLinks, query: q }).filter((item) => matchesTab(item, normalizedTab));
+
+  const providerHasMore = providerPageCounts.some((entry) => entry.count >= limit);
 
   const errorMap = new Map(errors.map((error) => [error.source, error]));
   const providerStatus = selectedProviders.map((provider) => ({
@@ -458,7 +466,7 @@ export async function executeSearch({ query, providers }) {
     links: enabledLinkProviders.map((provider) => provider.id),
     count: finalResults.length,
     totalCount: totalForTab,
-    hasMore: finalResults.length === limit,
+    hasMore: Boolean(providerHasMore),
     results: finalResults,
     linkResults,
     quickLinks,
