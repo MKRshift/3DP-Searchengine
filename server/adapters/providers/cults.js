@@ -44,9 +44,9 @@ export function cultsProvider() {
       return true;
     },
     async search({ q, limit, page }) {
+      if (page > 1) return [];
       const url = new URL("https://cults3d.com/en/search");
       url.searchParams.set("q", q);
-      url.searchParams.set("page", String(page));
       const html = await fetchText(url.toString(), { timeoutMs: 15_000 });
       return parseItems(html, limit);
     },

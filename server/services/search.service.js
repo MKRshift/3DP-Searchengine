@@ -422,15 +422,15 @@ export async function executeSearch({ query, providers }) {
 
   const diversifiedAll = diversifyBySource(facetedAll);
 
-  const start = (page - 1) * limit;
-  const end = start + limit;
   const allForTab = diversifiedAll.filter((item) => matchesTab(item, normalizedTab));
   const totalForTab = allForTab.length;
-  const finalResults = allForTab.slice(start, end);
+  const finalResults = allForTab.slice(0, limit);
   const linkResults =
     page > 1
       ? []
       : buildLinkResults({ quickLinks, query: q }).filter((item) => matchesTab(item, normalizedTab));
+
+  const providerHasMore = providerPageCounts.some((entry) => entry.count >= limit);
 
   const errorMap = new Map(errors.map((error) => [error.source, error]));
   const providerStatus = selectedProviders.map((provider) => ({
@@ -458,7 +458,7 @@ export async function executeSearch({ query, providers }) {
     links: enabledLinkProviders.map((provider) => provider.id),
     count: finalResults.length,
     totalCount: totalForTab,
-    hasMore: finalResults.length === limit,
+    hasMore: Boolean(providerHasMore),
     results: finalResults,
     linkResults,
     quickLinks,
