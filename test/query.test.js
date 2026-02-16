@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { parseAdvancedQuery } from "../src/lib/query.js";
+import { parseAdvancedQuery } from "../server/lib/query.js";
 
 test("parseAdvancedQuery extracts provider/type/filter tokens", () => {
   const parsed = parseAdvancedQuery("source:sketchfab type:laser format:svg free gift box");

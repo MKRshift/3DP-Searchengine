@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeResult } from "../src/lib/normalize.js";
+import { normalizeResult } from "../server/lib/normalize.js";
 
 test("normalizeResult maps source payload to shared schema", () => {
   const normalized = normalizeResult({
