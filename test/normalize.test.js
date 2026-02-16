@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeResult } from "../server/lib/normalize.js";
+import { AdapterValidationError, normalizeResult } from "../server/services/normalize.service.js";
 
 test("normalizeResult maps source payload to shared schema", () => {
   const normalized = normalizeResult({
@@ -25,4 +25,16 @@ test("normalizeResult maps source payload to shared schema", () => {
   assert.equal(normalized.stats.likes, 12);
   assert.equal(normalized.license, "CC-BY");
   assert.deepEqual(normalized.formats, ["stl", "3mf"]);
+});
+
+test("normalizeResult enforces adapter schema", () => {
+  assert.throws(
+    () =>
+      normalizeResult({
+        source: "bad-provider",
+        title: "Broken",
+        url: "notaurl",
+      }),
+    AdapterValidationError
+  );
 });

@@ -1,4 +1,4 @@
-import { normalizeResult } from "../normalize.js";
+import { normalizeResult } from "../../services/normalize.service.js";
 
 export function buildLinkResults({ quickLinks, query }) {
   return quickLinks

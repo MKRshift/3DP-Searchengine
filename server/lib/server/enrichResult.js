@@ -1,4 +1,4 @@
-import { normalizeResult } from "../normalize.js";
+import { normalizeResult } from "../../services/normalize.service.js";
 
 export function enrichResult(item, providers) {
   const provider = providers[item.source];

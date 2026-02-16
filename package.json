@@ -10,9 +10,26 @@
     "test": "node --test",
     "deps:update": "npx npm-check-updates -u",
     "build:web": "node scripts/build-web.mjs",
-    "build": "npm run build:web"
+    "build": "npm run build:web",
+    "prepare": "husky",
+    "precommit:check": "npm run lint && npm test",
+    "lint-staged": "lint-staged"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "lru-cache": "^11.2.6",
+    "p-limit": "^7.3.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7"
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs}": [
+      "node --check"
+    ]
   }
 }

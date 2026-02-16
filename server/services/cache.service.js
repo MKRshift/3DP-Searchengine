@@ -1,0 +1,7 @@
+import { LRUCache } from "lru-cache";
+
+export const cache = new LRUCache({
+  max: 500,
+  ttl: 30_000,
+  allowStale: false,
+});
